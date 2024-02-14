@@ -26,7 +26,7 @@ func SetLogger(logger internal.Logging) {
 	internal.Logger = logger
 }
 
-//------------------------------------------------------------------------------
+// ------------------------------------------------------------------------------
 
 type Hook interface {
 	DialHook(next DialHook) DialHook
@@ -193,7 +193,7 @@ func (hs *hooksMixin) processTxPipelineHook(ctx context.Context, cmds []Cmder) e
 	return hs.current.txPipeline(ctx, cmds)
 }
 
-//------------------------------------------------------------------------------
+// ------------------------------------------------------------------------------
 
 type baseClient struct {
 	opt      *Options
@@ -637,7 +637,7 @@ func (c *baseClient) context(ctx context.Context) context.Context {
 	return context.Background()
 }
 
-//------------------------------------------------------------------------------
+// ------------------------------------------------------------------------------
 
 // Client is a Redis client representing a pool of zero or more underlying connections.
 // It's safe for concurrent use by multiple goroutines.
@@ -688,7 +688,7 @@ func (c *Client) Conn() *Conn {
 
 // Do create a Cmd from the args and processes the cmd.
 func (c *Client) Do(ctx context.Context, args ...interface{}) *Cmd {
-	cmd := NewCmd(ctx, args...)
+	cmd := NewCmd2(ctx, "", "", args)
 	_ = c.Process(ctx, cmd)
 	return cmd
 }
@@ -807,7 +807,7 @@ func (c *Client) SSubscribe(ctx context.Context, channels ...string) *PubSub {
 	return pubsub
 }
 
-//------------------------------------------------------------------------------
+// ------------------------------------------------------------------------------
 
 // Conn represents a single Redis connection rather than a pool of connections.
 // Prefer running commands from Client unless there is a specific need

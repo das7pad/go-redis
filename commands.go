@@ -50,53 +50,70 @@ func formatSec(ctx context.Context, dur time.Duration) int64 {
 	return int64(dur / time.Second)
 }
 
-func appendArgs(dst, src []interface{}) []interface{} {
+func appendArgs(dst, src []interface{}) ([]interface{}, []string) {
 	if len(src) == 1 {
 		return appendArg(dst, src[0])
 	}
+	if dst == nil {
+		return src, nil
+	}
 
 	dst = append(dst, src...)
-	return dst
+	return dst, nil
 }
 
-func appendArg(dst []interface{}, arg interface{}) []interface{} {
+func appendArg(dst []interface{}, arg interface{}) ([]interface{}, []string) {
 	switch arg := arg.(type) {
 	case []string:
-		for _, s := range arg {
-			dst = append(dst, s)
+		if len(dst) > 0 {
+			for _, s := range arg {
+				dst = append(dst, s)
+			}
+			return dst, nil
+		} else {
+			return nil, arg[:len(arg):len(arg)]
 		}
-		return dst
 	case []interface{}:
-		dst = append(dst, arg...)
-		return dst
+		if len(dst) > 0 {
+			return append(dst, arg...), nil
+		} else {
+			return arg[:len(arg):len(arg)], nil
+		}
 	case map[string]interface{}:
 		for k, v := range arg {
 			dst = append(dst, k, v)
 		}
-		return dst
+		return dst, nil
 	case map[string]string:
-		for k, v := range arg {
-			dst = append(dst, k, v)
+		if len(dst) > 0 {
+			for k, v := range arg {
+				dst = append(dst, k, v)
+			}
+			return dst, nil
 		}
-		return dst
-	case time.Time, time.Duration, encoding.BinaryMarshaler, net.IP:
-		return append(dst, arg)
+		argsS := make([]string, 0, len(arg)*2)
+		for k, v := range arg {
+			argsS = append(argsS, k, v)
+		}
+		return nil, argsS
+	case int64, time.Time, time.Duration, encoding.BinaryMarshaler, net.IP:
+		return append(dst, arg), nil
 	default:
 		// scan struct field
 		v := reflect.ValueOf(arg)
 		if v.Type().Kind() == reflect.Ptr {
 			if v.IsNil() {
 				// error: arg is not a valid object
-				return dst
+				return dst, nil
 			}
 			v = v.Elem()
 		}
 
 		if v.Type().Kind() == reflect.Struct {
-			return appendStructField(dst, v)
+			return appendStructField(dst, v), nil
 		}
 
-		return append(dst, arg)
+		return append(dst, arg), nil
 	}
 }
 
@@ -251,10 +268,10 @@ type cmdable func(ctx context.Context, cmd Cmder) error
 
 type statefulCmdable func(ctx context.Context, cmd Cmder) error
 
-//------------------------------------------------------------------------------
+// ------------------------------------------------------------------------------
 
 func (c statefulCmdable) Auth(ctx context.Context, password string) *StatusCmd {
-	cmd := NewStatusCmd(ctx, "auth", password)
+	cmd := NewStatusCmd2(ctx, "auth", password, nil)
 	_ = c(ctx, cmd)
 	return cmd
 }
@@ -263,40 +280,40 @@ func (c statefulCmdable) Auth(ctx context.Context, password string) *StatusCmd {
 // Should be used to authenticate the current connection with one of the connections defined in the ACL list
 // when connecting to a Redis 6.0 instance, or greater, that is using the Redis ACL system.
 func (c statefulCmdable) AuthACL(ctx context.Context, username, password string) *StatusCmd {
-	cmd := NewStatusCmd(ctx, "auth", username, password)
+	cmd := NewStatusCmd3(ctx, "auth", username, password, nil)
 	_ = c(ctx, cmd)
 	return cmd
 }
 
 func (c cmdable) Wait(ctx context.Context, numSlaves int, timeout time.Duration) *IntCmd {
-	cmd := NewIntCmd(ctx, "wait", numSlaves, int(timeout/time.Millisecond))
+	cmd := NewIntCmd2(ctx, "wait", "", []interface{}{numSlaves, int(timeout / time.Millisecond)})
 	cmd.setReadTimeout(timeout)
 	_ = c(ctx, cmd)
 	return cmd
 }
 
 func (c cmdable) WaitAOF(ctx context.Context, numLocal, numSlaves int, timeout time.Duration) *IntCmd {
-	cmd := NewIntCmd(ctx, "waitAOF", numLocal, numSlaves, int(timeout/time.Millisecond))
+	cmd := NewIntCmd2(ctx, "waitAOF", "", []interface{}{numLocal, numSlaves, int(timeout / time.Millisecond)})
 	cmd.setReadTimeout(timeout)
 	_ = c(ctx, cmd)
 	return cmd
 }
 
 func (c statefulCmdable) Select(ctx context.Context, index int) *StatusCmd {
-	cmd := NewStatusCmd(ctx, "select", index)
+	cmd := NewStatusCmd2(ctx, "select", "", []interface{}{index})
 	_ = c(ctx, cmd)
 	return cmd
 }
 
 func (c statefulCmdable) SwapDB(ctx context.Context, index1, index2 int) *StatusCmd {
-	cmd := NewStatusCmd(ctx, "swapdb", index1, index2)
+	cmd := NewStatusCmd2(ctx, "swapdb", "", []interface{}{index1, index2})
 	_ = c(ctx, cmd)
 	return cmd
 }
 
 // ClientSetName assigns a name to the connection.
 func (c statefulCmdable) ClientSetName(ctx context.Context, name string) *BoolCmd {
-	cmd := NewBoolCmd(ctx, "client", "setname", name)
+	cmd := NewBoolCmd3(ctx, "client", "setname", name, nil)
 	_ = c(ctx, cmd)
 	return cmd
 }
@@ -311,9 +328,9 @@ func (c statefulCmdable) ClientSetInfo(ctx context.Context, info LibraryInfo) *S
 	var cmd *StatusCmd
 	if info.LibName != nil {
 		libName := fmt.Sprintf("go-redis(%s,%s)", *info.LibName, internal.ReplaceSpaces(runtime.Version()))
-		cmd = NewStatusCmd(ctx, "client", "setinfo", "LIB-NAME", libName)
+		cmd = NewStatusCmd3S(ctx, "client", "setinfo", "LIB-NAME", []string{libName})
 	} else {
-		cmd = NewStatusCmd(ctx, "client", "setinfo", "LIB-VER", *info.LibVer)
+		cmd = NewStatusCmd3S(ctx, "client", "setinfo", "LIB-VER", []string{*info.LibVer})
 	}
 
 	_ = c(ctx, cmd)
@@ -335,8 +352,8 @@ func (info LibraryInfo) Validate() error {
 func (c statefulCmdable) Hello(ctx context.Context,
 	ver int, username, password, clientName string,
 ) *MapStringInterfaceCmd {
-	args := make([]interface{}, 0, 7)
-	args = append(args, "hello", ver)
+	args := make([]interface{}, 0, 6)
+	args = append(args, ver)
 	if password != "" {
 		if username != "" {
 			args = append(args, "auth", username, password)
@@ -347,15 +364,15 @@ func (c statefulCmdable) Hello(ctx context.Context,
 	if clientName != "" {
 		args = append(args, "setname", clientName)
 	}
-	cmd := NewMapStringInterfaceCmd(ctx, args...)
+	cmd := NewMapStringInterfaceCmd2(ctx, "hello", "", args)
 	_ = c(ctx, cmd)
 	return cmd
 }
 
-//------------------------------------------------------------------------------
+// ------------------------------------------------------------------------------
 
 func (c cmdable) Command(ctx context.Context) *CommandsInfoCmd {
-	cmd := NewCommandsInfoCmd(ctx, "command")
+	cmd := NewCommandsInfoCmd2(ctx, "command", "", nil)
 	_ = c(ctx, cmd)
 	return cmd
 }
@@ -368,8 +385,7 @@ type FilterBy struct {
 }
 
 func (c cmdable) CommandList(ctx context.Context, filter *FilterBy) *StringSliceCmd {
-	args := make([]interface{}, 0, 5)
-	args = append(args, "command", "list")
+	args := make([]string, 0, 3)
 	if filter != nil {
 		if filter.Module != "" {
 			args = append(args, "filterby", "module", filter.Module)
@@ -379,46 +395,38 @@ func (c cmdable) CommandList(ctx context.Context, filter *FilterBy) *StringSlice
 			args = append(args, "filterby", "pattern", filter.Pattern)
 		}
 	}
-	cmd := NewStringSliceCmd(ctx, args...)
+	cmd := NewStringSliceCmd2S(ctx, "command", "list", args)
 	_ = c(ctx, cmd)
 	return cmd
 }
 
 func (c cmdable) CommandGetKeys(ctx context.Context, commands ...interface{}) *StringSliceCmd {
-	args := make([]interface{}, 2+len(commands))
-	args[0] = "command"
-	args[1] = "getkeys"
-	copy(args[2:], commands)
-	cmd := NewStringSliceCmd(ctx, args...)
+	cmd := NewStringSliceCmd2(ctx, "command", "getkeys", commands)
 	_ = c(ctx, cmd)
 	return cmd
 }
 
 func (c cmdable) CommandGetKeysAndFlags(ctx context.Context, commands ...interface{}) *KeyFlagsCmd {
-	args := make([]interface{}, 2+len(commands))
-	args[0] = "command"
-	args[1] = "getkeysandflags"
-	copy(args[2:], commands)
-	cmd := NewKeyFlagsCmd(ctx, args...)
+	cmd := NewKeyFlagsCmd2(ctx, "command", "getkeysandflags", commands)
 	_ = c(ctx, cmd)
 	return cmd
 }
 
 // ClientGetName returns the name of the connection.
 func (c cmdable) ClientGetName(ctx context.Context) *StringCmd {
-	cmd := NewStringCmd(ctx, "client", "getname")
+	cmd := NewStringCmd2(ctx, "client", "getname", nil)
 	_ = c(ctx, cmd)
 	return cmd
 }
 
 func (c cmdable) Echo(ctx context.Context, message interface{}) *StringCmd {
-	cmd := NewStringCmd(ctx, "echo", message)
+	cmd := NewStringCmd2(ctx, "echo", "", []interface{}{message})
 	_ = c(ctx, cmd)
 	return cmd
 }
 
 func (c cmdable) Ping(ctx context.Context) *StatusCmd {
-	cmd := NewStatusCmd(ctx, "ping")
+	cmd := NewStatusCmd2(ctx, "ping", "", nil)
 	_ = c(ctx, cmd)
 	return cmd
 }
@@ -427,22 +435,22 @@ func (c cmdable) Quit(_ context.Context) *StatusCmd {
 	panic("not implemented")
 }
 
-//------------------------------------------------------------------------------
+// ------------------------------------------------------------------------------
 
 func (c cmdable) BgRewriteAOF(ctx context.Context) *StatusCmd {
-	cmd := NewStatusCmd(ctx, "bgrewriteaof")
+	cmd := NewStatusCmd2(ctx, "bgrewriteaof", "", nil)
 	_ = c(ctx, cmd)
 	return cmd
 }
 
 func (c cmdable) BgSave(ctx context.Context) *StatusCmd {
-	cmd := NewStatusCmd(ctx, "bgsave")
+	cmd := NewStatusCmd2(ctx, "bgsave", "", nil)
 	_ = c(ctx, cmd)
 	return cmd
 }
 
 func (c cmdable) ClientKill(ctx context.Context, ipPort string) *StatusCmd {
-	cmd := NewStatusCmd(ctx, "client", "kill", ipPort)
+	cmd := NewStatusCmd3(ctx, "client", "kill", ipPort, nil)
 	_ = c(ctx, cmd)
 	return cmd
 }
@@ -451,55 +459,49 @@ func (c cmdable) ClientKill(ctx context.Context, ipPort string) *StatusCmd {
 //
 //	CLIENT KILL <option> [value] ... <option> [value]
 func (c cmdable) ClientKillByFilter(ctx context.Context, keys ...string) *IntCmd {
-	args := make([]interface{}, 2+len(keys))
-	args[0] = "client"
-	args[1] = "kill"
-	for i, key := range keys {
-		args[2+i] = key
-	}
-	cmd := NewIntCmd(ctx, args...)
+	cmd := NewIntCmd2S(ctx, "client", "kill", keys)
 	_ = c(ctx, cmd)
 	return cmd
 }
 
 func (c cmdable) ClientList(ctx context.Context) *StringCmd {
-	cmd := NewStringCmd(ctx, "client", "list")
+	cmd := NewStringCmd2(ctx, "client", "list", nil)
 	_ = c(ctx, cmd)
 	return cmd
 }
 
 func (c cmdable) ClientPause(ctx context.Context, dur time.Duration) *BoolCmd {
-	cmd := NewBoolCmd(ctx, "client", "pause", formatMs(ctx, dur))
+	cmd := NewBoolCmd2(ctx, "client", "pause", []interface{}{formatMs(ctx, dur)})
 	_ = c(ctx, cmd)
 	return cmd
 }
 
 func (c cmdable) ClientUnpause(ctx context.Context) *BoolCmd {
-	cmd := NewBoolCmd(ctx, "client", "unpause")
+	cmd := NewBoolCmd2(ctx, "client", "unpause", nil)
 	_ = c(ctx, cmd)
 	return cmd
 }
 
 func (c cmdable) ClientID(ctx context.Context) *IntCmd {
-	cmd := NewIntCmd(ctx, "client", "id")
+	cmd := NewIntCmd2(ctx, "client", "id", nil)
 	_ = c(ctx, cmd)
 	return cmd
 }
 
 func (c cmdable) ClientUnblock(ctx context.Context, id int64) *IntCmd {
-	cmd := NewIntCmd(ctx, "client", "unblock", id)
+	cmd := NewIntCmd2(ctx, "client", "unblock", []interface{}{id})
 	_ = c(ctx, cmd)
 	return cmd
 }
 
 func (c cmdable) ClientUnblockWithError(ctx context.Context, id int64) *IntCmd {
-	cmd := NewIntCmd(ctx, "client", "unblock", id, "error")
+	cmd := NewIntCmd2(ctx, "client", "unblock", []interface{}{id, "error"})
 	_ = c(ctx, cmd)
 	return cmd
 }
 
 func (c cmdable) ClientInfo(ctx context.Context) *ClientInfoCmd {
-	cmd := NewClientInfoCmd(ctx, "client", "info")
+	cmd := NewClientInfoCmd2(ctx, "client", "info", nil)
 	_ = c(ctx, cmd)
 	return cmd
 }
@@ -507,101 +509,85 @@ func (c cmdable) ClientInfo(ctx context.Context) *ClientInfoCmd {
 // ------------------------------------------------------------------------------------------------
 
 func (c cmdable) ConfigGet(ctx context.Context, parameter string) *MapStringStringCmd {
-	cmd := NewMapStringStringCmd(ctx, "config", "get", parameter)
+	cmd := NewMapStringStringCmd3(ctx, "config", "get", parameter, nil)
 	_ = c(ctx, cmd)
 	return cmd
 }
 
 func (c cmdable) ConfigResetStat(ctx context.Context) *StatusCmd {
-	cmd := NewStatusCmd(ctx, "config", "resetstat")
+	cmd := NewStatusCmd2(ctx, "config", "resetstat", nil)
 	_ = c(ctx, cmd)
 	return cmd
 }
 
 func (c cmdable) ConfigSet(ctx context.Context, parameter, value string) *StatusCmd {
-	cmd := NewStatusCmd(ctx, "config", "set", parameter, value)
+	cmd := NewStatusCmd3S(ctx, "config", "set", parameter, []string{value})
 	_ = c(ctx, cmd)
 	return cmd
 }
 
 func (c cmdable) ConfigRewrite(ctx context.Context) *StatusCmd {
-	cmd := NewStatusCmd(ctx, "config", "rewrite")
+	cmd := NewStatusCmd2(ctx, "config", "rewrite", nil)
 	_ = c(ctx, cmd)
 	return cmd
 }
 
 func (c cmdable) DBSize(ctx context.Context) *IntCmd {
-	cmd := NewIntCmd(ctx, "dbsize")
+	cmd := NewIntCmd2(ctx, "dbsize", "", nil)
 	_ = c(ctx, cmd)
 	return cmd
 }
 
 func (c cmdable) FlushAll(ctx context.Context) *StatusCmd {
-	cmd := NewStatusCmd(ctx, "flushall")
+	cmd := NewStatusCmd2(ctx, "flushall", "", nil)
 	_ = c(ctx, cmd)
 	return cmd
 }
 
 func (c cmdable) FlushAllAsync(ctx context.Context) *StatusCmd {
-	cmd := NewStatusCmd(ctx, "flushall", "async")
+	cmd := NewStatusCmd2(ctx, "flushall", "async", nil)
 	_ = c(ctx, cmd)
 	return cmd
 }
 
 func (c cmdable) FlushDB(ctx context.Context) *StatusCmd {
-	cmd := NewStatusCmd(ctx, "flushdb")
+	cmd := NewStatusCmd2(ctx, "flushdb", "", nil)
 	_ = c(ctx, cmd)
 	return cmd
 }
 
 func (c cmdable) FlushDBAsync(ctx context.Context) *StatusCmd {
-	cmd := NewStatusCmd(ctx, "flushdb", "async")
+	cmd := NewStatusCmd2(ctx, "flushdb", "async", nil)
 	_ = c(ctx, cmd)
 	return cmd
 }
 
 func (c cmdable) Info(ctx context.Context, sections ...string) *StringCmd {
-	args := make([]interface{}, 1+len(sections))
-	args[0] = "info"
-	for i, section := range sections {
-		args[i+1] = section
-	}
-	cmd := NewStringCmd(ctx, args...)
+	cmd := NewStringCmd2S(ctx, "info", "", sections)
 	_ = c(ctx, cmd)
 	return cmd
 }
 
 func (c cmdable) InfoMap(ctx context.Context, sections ...string) *InfoCmd {
-	args := make([]interface{}, 1+len(sections))
-	args[0] = "info"
-	for i, section := range sections {
-		args[i+1] = section
-	}
-	cmd := NewInfoCmd(ctx, args...)
+	cmd := NewInfoCmd2S(ctx, "info", "", sections)
 	_ = c(ctx, cmd)
 	return cmd
 }
 
 func (c cmdable) LastSave(ctx context.Context) *IntCmd {
-	cmd := NewIntCmd(ctx, "lastsave")
+	cmd := NewIntCmd2(ctx, "lastsave", "", nil)
 	_ = c(ctx, cmd)
 	return cmd
 }
 
 func (c cmdable) Save(ctx context.Context) *StatusCmd {
-	cmd := NewStatusCmd(ctx, "save")
+	cmd := NewStatusCmd2(ctx, "save", "", nil)
 	_ = c(ctx, cmd)
 	return cmd
 }
 
 func (c cmdable) shutdown(ctx context.Context, modifier string) *StatusCmd {
-	var args []interface{}
-	if modifier == "" {
-		args = []interface{}{"shutdown"}
-	} else {
-		args = []interface{}{"shutdown", modifier}
-	}
-	cmd := NewStatusCmd(ctx, args...)
+	cmd := NewStatusCmd2(ctx, "shutdown", modifier, nil)
 	_ = c(ctx, cmd)
 	if err := cmd.Err(); err != nil {
 		if err == io.EOF {
@@ -629,13 +615,13 @@ func (c cmdable) ShutdownNoSave(ctx context.Context) *StatusCmd {
 }
 
 func (c cmdable) SlaveOf(ctx context.Context, host, port string) *StatusCmd {
-	cmd := NewStatusCmd(ctx, "slaveof", host, port)
+	cmd := NewStatusCmd3(ctx, "slaveof", host, port, nil)
 	_ = c(ctx, cmd)
 	return cmd
 }
 
 func (c cmdable) SlowLogGet(ctx context.Context, num int64) *SlowLogCmd {
-	cmd := NewSlowLogCmd(context.Background(), "slowlog", "get", num)
+	cmd := NewSlowLogCmd2(context.Background(), "slowlog", "get", []interface{}{num})
 	_ = c(ctx, cmd)
 	return cmd
 }
@@ -645,32 +631,32 @@ func (c cmdable) Sync(_ context.Context) {
 }
 
 func (c cmdable) Time(ctx context.Context) *TimeCmd {
-	cmd := NewTimeCmd(ctx, "time")
+	cmd := NewTimeCmd2(ctx, "time", "", nil)
 	_ = c(ctx, cmd)
 	return cmd
 }
 
 func (c cmdable) DebugObject(ctx context.Context, key string) *StringCmd {
-	cmd := NewStringCmd(ctx, "debug", "object", key)
+	cmd := NewStringCmd3(ctx, "debug", "object", key, nil)
 	_ = c(ctx, cmd)
 	return cmd
 }
 
 func (c cmdable) MemoryUsage(ctx context.Context, key string, samples ...int) *IntCmd {
-	args := []interface{}{"memory", "usage", key}
+	var args []interface{}
 	if len(samples) > 0 {
 		if len(samples) != 1 {
 			panic("MemoryUsage expects single sample count")
 		}
 		args = append(args, "SAMPLES", samples[0])
 	}
-	cmd := NewIntCmd(ctx, args...)
+	cmd := NewIntCmd3(ctx, "memory", "usage", key, args)
 	cmd.SetFirstKeyPos(2)
 	_ = c(ctx, cmd)
 	return cmd
 }
 
-//------------------------------------------------------------------------------
+// ------------------------------------------------------------------------------
 
 // ModuleLoadexConfig struct is used to specify the arguments for the MODULE LOADEX command of redis.
 // `MODULE LOADEX path [CONFIG name value [CONFIG name value ...]] [ARGS args [args ...]]`

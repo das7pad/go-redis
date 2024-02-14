@@ -39,55 +39,49 @@ type HashCmdable interface {
 }
 
 func (c cmdable) HDel(ctx context.Context, key string, fields ...string) *IntCmd {
-	args := make([]interface{}, 2+len(fields))
-	args[0] = "hdel"
-	args[1] = key
-	for i, field := range fields {
-		args[2+i] = field
-	}
-	cmd := NewIntCmd(ctx, args...)
+	cmd := NewIntCmd2S(ctx, "hdel", key, fields)
 	_ = c(ctx, cmd)
 	return cmd
 }
 
 func (c cmdable) HExists(ctx context.Context, key, field string) *BoolCmd {
-	cmd := NewBoolCmd(ctx, "hexists", key, field)
+	cmd := NewBoolCmd3(ctx, "hexists", key, field, nil)
 	_ = c(ctx, cmd)
 	return cmd
 }
 
 func (c cmdable) HGet(ctx context.Context, key, field string) *StringCmd {
-	cmd := NewStringCmd(ctx, "hget", key, field)
+	cmd := NewStringCmd3(ctx, "hget", key, field, nil)
 	_ = c(ctx, cmd)
 	return cmd
 }
 
 func (c cmdable) HGetAll(ctx context.Context, key string) *MapStringStringCmd {
-	cmd := NewMapStringStringCmd(ctx, "hgetall", key)
+	cmd := NewMapStringStringCmd2(ctx, "hgetall", key, nil)
 	_ = c(ctx, cmd)
 	return cmd
 }
 
 func (c cmdable) HIncrBy(ctx context.Context, key, field string, incr int64) *IntCmd {
-	cmd := NewIntCmd(ctx, "hincrby", key, field, incr)
+	cmd := NewIntCmd3(ctx, "hincrby", key, field, []interface{}{incr})
 	_ = c(ctx, cmd)
 	return cmd
 }
 
 func (c cmdable) HIncrByFloat(ctx context.Context, key, field string, incr float64) *FloatCmd {
-	cmd := NewFloatCmd(ctx, "hincrbyfloat", key, field, incr)
+	cmd := NewFloatCmd3(ctx, "hincrbyfloat", key, field, []interface{}{incr})
 	_ = c(ctx, cmd)
 	return cmd
 }
 
 func (c cmdable) HKeys(ctx context.Context, key string) *StringSliceCmd {
-	cmd := NewStringSliceCmd(ctx, "hkeys", key)
+	cmd := NewStringSliceCmd2(ctx, "hkeys", key, nil)
 	_ = c(ctx, cmd)
 	return cmd
 }
 
 func (c cmdable) HLen(ctx context.Context, key string) *IntCmd {
-	cmd := NewIntCmd(ctx, "hlen", key)
+	cmd := NewIntCmd2(ctx, "hlen", key, nil)
 	_ = c(ctx, cmd)
 	return cmd
 }
@@ -95,13 +89,7 @@ func (c cmdable) HLen(ctx context.Context, key string) *IntCmd {
 // HMGet returns the values for the specified fields in the hash stored at key.
 // It returns an interface{} to distinguish between empty string and nil value.
 func (c cmdable) HMGet(ctx context.Context, key string, fields ...string) *SliceCmd {
-	args := make([]interface{}, 2+len(fields))
-	args[0] = "hmget"
-	args[1] = key
-	for i, field := range fields {
-		args[2+i] = field
-	}
-	cmd := NewSliceCmd(ctx, args...)
+	cmd := NewSliceCmd2S(ctx, "hmget", key, fields)
 	_ = c(ctx, cmd)
 	return cmd
 }
@@ -131,61 +119,53 @@ func (c cmdable) HMGet(ctx context.Context, key string, fields ...string) *Slice
 // If you are using a Struct type and the number of fields is greater than one,
 // you will receive an error similar to "ERR wrong number of arguments", you can use HMSet as a substitute.
 func (c cmdable) HSet(ctx context.Context, key string, values ...interface{}) *IntCmd {
-	args := make([]interface{}, 2, 2+len(values))
-	args[0] = "hset"
-	args[1] = key
-	args = appendArgs(args, values)
-	cmd := NewIntCmd(ctx, args...)
+	cmd := NewIntCmd2Any(ctx, "hset", key, values)
 	_ = c(ctx, cmd)
 	return cmd
 }
 
 // HMSet is a deprecated version of HSet left for compatibility with Redis 3.
 func (c cmdable) HMSet(ctx context.Context, key string, values ...interface{}) *BoolCmd {
-	args := make([]interface{}, 2, 2+len(values))
-	args[0] = "hmset"
-	args[1] = key
-	args = appendArgs(args, values)
-	cmd := NewBoolCmd(ctx, args...)
+	cmd := NewBoolCmd2Any(ctx, "hmset", key, values)
 	_ = c(ctx, cmd)
 	return cmd
 }
 
 func (c cmdable) HSetNX(ctx context.Context, key, field string, value interface{}) *BoolCmd {
-	cmd := NewBoolCmd(ctx, "hsetnx", key, field, value)
+	cmd := NewBoolCmd3(ctx, "hsetnx", key, field, []interface{}{value})
 	_ = c(ctx, cmd)
 	return cmd
 }
 
 func (c cmdable) HVals(ctx context.Context, key string) *StringSliceCmd {
-	cmd := NewStringSliceCmd(ctx, "hvals", key)
+	cmd := NewStringSliceCmd2(ctx, "hvals", key, nil)
 	_ = c(ctx, cmd)
 	return cmd
 }
 
 // HRandField redis-server version >= 6.2.0.
 func (c cmdable) HRandField(ctx context.Context, key string, count int) *StringSliceCmd {
-	cmd := NewStringSliceCmd(ctx, "hrandfield", key, count)
+	cmd := NewStringSliceCmd2(ctx, "hrandfield", key, []interface{}{count})
 	_ = c(ctx, cmd)
 	return cmd
 }
 
 // HRandFieldWithValues redis-server version >= 6.2.0.
 func (c cmdable) HRandFieldWithValues(ctx context.Context, key string, count int) *KeyValueSliceCmd {
-	cmd := NewKeyValueSliceCmd(ctx, "hrandfield", key, count, "withvalues")
+	cmd := NewKeyValueSliceCmd2(ctx, "hrandfield", key, []interface{}{count, "withvalues"})
 	_ = c(ctx, cmd)
 	return cmd
 }
 
 func (c cmdable) HScan(ctx context.Context, key string, cursor uint64, match string, count int64) *ScanCmd {
-	args := []interface{}{"hscan", key, cursor}
+	args := []interface{}{cursor}
 	if match != "" {
 		args = append(args, "match", match)
 	}
 	if count > 0 {
 		args = append(args, "count", count)
 	}
-	cmd := NewScanCmd(ctx, c, args...)
+	cmd := NewScanCmd2(ctx, c, "hscan", key, args)
 	_ = c(ctx, cmd)
 	return cmd
 }

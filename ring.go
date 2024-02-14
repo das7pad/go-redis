@@ -12,7 +12,7 @@ import (
 	"time"
 
 	"github.com/cespare/xxhash/v2"
-	"github.com/dgryski/go-rendezvous" //nolint
+	"github.com/dgryski/go-rendezvous" // nolint
 
 	"github.com/redis/go-redis/v9/internal"
 	"github.com/redis/go-redis/v9/internal/hashtag"
@@ -22,7 +22,7 @@ import (
 
 var errRingShardsDown = errors.New("redis: all ring shards are down")
 
-//------------------------------------------------------------------------------
+// ------------------------------------------------------------------------------
 
 type ConsistentHash interface {
 	Get(string) string
@@ -40,7 +40,7 @@ func newRendezvous(shards []string) ConsistentHash {
 	return rendezvousWrapper{rendezvous.New(shards, xxhash.Sum64String)}
 }
 
-//------------------------------------------------------------------------------
+// ------------------------------------------------------------------------------
 
 // RingOptions are used to configure a ring client and should be
 // passed to NewRing.
@@ -173,7 +173,7 @@ func (opt *RingOptions) clientOptions() *Options {
 	}
 }
 
-//------------------------------------------------------------------------------
+// ------------------------------------------------------------------------------
 
 type ringShard struct {
 	Client *Client
@@ -226,7 +226,7 @@ func (shard *ringShard) Vote(up bool) bool {
 	return shard.IsDown()
 }
 
-//------------------------------------------------------------------------------
+// ------------------------------------------------------------------------------
 
 type ringSharding struct {
 	opt *RingOptions
@@ -482,7 +482,7 @@ func (c *ringSharding) Close() error {
 	return firstErr
 }
 
-//------------------------------------------------------------------------------
+// ------------------------------------------------------------------------------
 
 // Ring is a Redis client that uses consistent hashing to distribute
 // keys across multiple Redis servers (shards). It's safe for
@@ -543,7 +543,7 @@ func (c *Ring) SetAddrs(addrs map[string]string) {
 
 // Do create a Cmd from the args and processes the cmd.
 func (c *Ring) Do(ctx context.Context, args ...interface{}) *Cmd {
-	cmd := NewCmd(ctx, args...)
+	cmd := NewCmd2(ctx, "", "", args)
 	_ = c.Process(ctx, cmd)
 	return cmd
 }

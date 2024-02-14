@@ -31,38 +31,38 @@ type StringCmdable interface {
 }
 
 func (c cmdable) Append(ctx context.Context, key, value string) *IntCmd {
-	cmd := NewIntCmd(ctx, "append", key, value)
+	cmd := NewIntCmd3(ctx, "append", key, value, nil)
 	_ = c(ctx, cmd)
 	return cmd
 }
 
 func (c cmdable) Decr(ctx context.Context, key string) *IntCmd {
-	cmd := NewIntCmd(ctx, "decr", key)
+	cmd := NewIntCmd2(ctx, "decr", key, nil)
 	_ = c(ctx, cmd)
 	return cmd
 }
 
 func (c cmdable) DecrBy(ctx context.Context, key string, decrement int64) *IntCmd {
-	cmd := NewIntCmd(ctx, "decrby", key, decrement)
+	cmd := NewIntCmd2(ctx, "decrby", key, []interface{}{decrement})
 	_ = c(ctx, cmd)
 	return cmd
 }
 
 // Get Redis `GET key` command. It returns redis.Nil error when key does not exist.
 func (c cmdable) Get(ctx context.Context, key string) *StringCmd {
-	cmd := NewStringCmd(ctx, "get", key)
+	cmd := NewStringCmd2(ctx, "get", key, nil)
 	_ = c(ctx, cmd)
 	return cmd
 }
 
 func (c cmdable) GetRange(ctx context.Context, key string, start, end int64) *StringCmd {
-	cmd := NewStringCmd(ctx, "getrange", key, start, end)
+	cmd := NewStringCmd2(ctx, "getrange", key, []interface{}{start, end})
 	_ = c(ctx, cmd)
 	return cmd
 }
 
 func (c cmdable) GetSet(ctx context.Context, key string, value interface{}) *StringCmd {
-	cmd := NewStringCmd(ctx, "getset", key, value)
+	cmd := NewStringCmd2(ctx, "getset", key, []interface{}{value})
 	_ = c(ctx, cmd)
 	return cmd
 }
@@ -70,8 +70,7 @@ func (c cmdable) GetSet(ctx context.Context, key string, value interface{}) *Str
 // GetEx An expiration of zero removes the TTL associated with the key (i.e. GETEX key persist).
 // Requires Redis >= 6.2.0.
 func (c cmdable) GetEx(ctx context.Context, key string, expiration time.Duration) *StringCmd {
-	args := make([]interface{}, 0, 4)
-	args = append(args, "getex", key)
+	var args []interface{}
 	if expiration > 0 {
 		if usePrecise(expiration) {
 			args = append(args, "px", formatMs(ctx, expiration))
@@ -82,32 +81,32 @@ func (c cmdable) GetEx(ctx context.Context, key string, expiration time.Duration
 		args = append(args, "persist")
 	}
 
-	cmd := NewStringCmd(ctx, args...)
+	cmd := NewStringCmd2(ctx, "getex", key, args)
 	_ = c(ctx, cmd)
 	return cmd
 }
 
 // GetDel redis-server version >= 6.2.0.
 func (c cmdable) GetDel(ctx context.Context, key string) *StringCmd {
-	cmd := NewStringCmd(ctx, "getdel", key)
+	cmd := NewStringCmd2(ctx, "getdel", key, nil)
 	_ = c(ctx, cmd)
 	return cmd
 }
 
 func (c cmdable) Incr(ctx context.Context, key string) *IntCmd {
-	cmd := NewIntCmd(ctx, "incr", key)
+	cmd := NewIntCmd2(ctx, "incr", key, nil)
 	_ = c(ctx, cmd)
 	return cmd
 }
 
 func (c cmdable) IncrBy(ctx context.Context, key string, value int64) *IntCmd {
-	cmd := NewIntCmd(ctx, "incrby", key, value)
+	cmd := NewIntCmd2(ctx, "incrby", key, []interface{}{value})
 	_ = c(ctx, cmd)
 	return cmd
 }
 
 func (c cmdable) IncrByFloat(ctx context.Context, key string, value float64) *FloatCmd {
-	cmd := NewFloatCmd(ctx, "incrbyfloat", key, value)
+	cmd := NewFloatCmd2(ctx, "incrbyfloat", key, []interface{}{value})
 	_ = c(ctx, cmd)
 	return cmd
 }
@@ -119,12 +118,7 @@ func (c cmdable) LCS(ctx context.Context, q *LCSQuery) *LCSCmd {
 }
 
 func (c cmdable) MGet(ctx context.Context, keys ...string) *SliceCmd {
-	args := make([]interface{}, 1+len(keys))
-	args[0] = "mget"
-	for i, key := range keys {
-		args[1+i] = key
-	}
-	cmd := NewSliceCmd(ctx, args...)
+	cmd := NewSliceCmd2S(ctx, "mget", "", keys)
 	_ = c(ctx, cmd)
 	return cmd
 }
@@ -135,10 +129,7 @@ func (c cmdable) MGet(ctx context.Context, keys ...string) *SliceCmd {
 //   - MSet(map[string]interface{}{"key1": "value1", "key2": "value2"})
 //   - MSet(struct), For struct types, see HSet description.
 func (c cmdable) MSet(ctx context.Context, values ...interface{}) *StatusCmd {
-	args := make([]interface{}, 1, 1+len(values))
-	args[0] = "mset"
-	args = appendArgs(args, values)
-	cmd := NewStatusCmd(ctx, args...)
+	cmd := NewStatusCmd2Any(ctx, "mset", "", values)
 	_ = c(ctx, cmd)
 	return cmd
 }
@@ -149,10 +140,7 @@ func (c cmdable) MSet(ctx context.Context, values ...interface{}) *StatusCmd {
 //   - MSetNX(map[string]interface{}{"key1": "value1", "key2": "value2"})
 //   - MSetNX(struct), For struct types, see HSet description.
 func (c cmdable) MSetNX(ctx context.Context, values ...interface{}) *BoolCmd {
-	args := make([]interface{}, 1, 1+len(values))
-	args[0] = "msetnx"
-	args = appendArgs(args, values)
-	cmd := NewBoolCmd(ctx, args...)
+	cmd := NewBoolCmd2Any(ctx, "msetnx", "", values)
 	_ = c(ctx, cmd)
 	return cmd
 }
@@ -164,10 +152,7 @@ func (c cmdable) MSetNX(ctx context.Context, values ...interface{}) *BoolCmd {
 // KeepTTL is a Redis KEEPTTL option to keep existing TTL, it requires your redis-server version >= 6.0,
 // otherwise you will receive an error: (error) ERR syntax error.
 func (c cmdable) Set(ctx context.Context, key string, value interface{}, expiration time.Duration) *StatusCmd {
-	args := make([]interface{}, 3, 5)
-	args[0] = "set"
-	args[1] = key
-	args[2] = value
+	args := []interface{}{value}
 	if expiration > 0 {
 		if usePrecise(expiration) {
 			args = append(args, "px", formatMs(ctx, expiration))
@@ -178,7 +163,7 @@ func (c cmdable) Set(ctx context.Context, key string, value interface{}, expirat
 		args = append(args, "keepttl")
 	}
 
-	cmd := NewStatusCmd(ctx, args...)
+	cmd := NewStatusCmd2(ctx, "set", key, args)
 	_ = c(ctx, cmd)
 	return cmd
 }
@@ -204,7 +189,7 @@ type SetArgs struct {
 // It is the alternative to the Set function when you want
 // to have more control over the options.
 func (c cmdable) SetArgs(ctx context.Context, key string, value interface{}, a SetArgs) *StatusCmd {
-	args := []interface{}{"set", key, value}
+	args := []interface{}{value}
 
 	if a.KeepTTL {
 		args = append(args, "keepttl")
@@ -229,14 +214,14 @@ func (c cmdable) SetArgs(ctx context.Context, key string, value interface{}, a S
 		args = append(args, "get")
 	}
 
-	cmd := NewStatusCmd(ctx, args...)
+	cmd := NewStatusCmd2(ctx, "set", key, args)
 	_ = c(ctx, cmd)
 	return cmd
 }
 
 // SetEx Redis `SETEx key expiration value` command.
 func (c cmdable) SetEx(ctx context.Context, key string, value interface{}, expiration time.Duration) *StatusCmd {
-	cmd := NewStatusCmd(ctx, "setex", key, formatSec(ctx, expiration), value)
+	cmd := NewStatusCmd2(ctx, "setex", key, []interface{}{formatSec(ctx, expiration), value})
 	_ = c(ctx, cmd)
 	return cmd
 }
@@ -251,14 +236,14 @@ func (c cmdable) SetNX(ctx context.Context, key string, value interface{}, expir
 	switch expiration {
 	case 0:
 		// Use old `SETNX` to support old Redis versions.
-		cmd = NewBoolCmd(ctx, "setnx", key, value)
+		cmd = NewBoolCmd2(ctx, "setnx", key, []interface{}{value})
 	case KeepTTL:
-		cmd = NewBoolCmd(ctx, "set", key, value, "keepttl", "nx")
+		cmd = NewBoolCmd2(ctx, "set", key, []interface{}{value, "keepttl", "nx"})
 	default:
 		if usePrecise(expiration) {
-			cmd = NewBoolCmd(ctx, "set", key, value, "px", formatMs(ctx, expiration), "nx")
+			cmd = NewBoolCmd2(ctx, "set", key, []interface{}{value, "px", formatMs(ctx, expiration), "nx"})
 		} else {
-			cmd = NewBoolCmd(ctx, "set", key, value, "ex", formatSec(ctx, expiration), "nx")
+			cmd = NewBoolCmd2(ctx, "set", key, []interface{}{value, "ex", formatSec(ctx, expiration), "nx"})
 		}
 	}
 
@@ -275,14 +260,14 @@ func (c cmdable) SetXX(ctx context.Context, key string, value interface{}, expir
 	var cmd *BoolCmd
 	switch expiration {
 	case 0:
-		cmd = NewBoolCmd(ctx, "set", key, value, "xx")
+		cmd = NewBoolCmd2(ctx, "set", key, []interface{}{value, "xx"})
 	case KeepTTL:
-		cmd = NewBoolCmd(ctx, "set", key, value, "keepttl", "xx")
+		cmd = NewBoolCmd2(ctx, "set", key, []interface{}{value, "keepttl", "xx"})
 	default:
 		if usePrecise(expiration) {
-			cmd = NewBoolCmd(ctx, "set", key, value, "px", formatMs(ctx, expiration), "xx")
+			cmd = NewBoolCmd2(ctx, "set", key, []interface{}{value, "px", formatMs(ctx, expiration), "xx"})
 		} else {
-			cmd = NewBoolCmd(ctx, "set", key, value, "ex", formatSec(ctx, expiration), "xx")
+			cmd = NewBoolCmd2(ctx, "set", key, []interface{}{value, "ex", formatSec(ctx, expiration), "xx"})
 		}
 	}
 
@@ -291,13 +276,13 @@ func (c cmdable) SetXX(ctx context.Context, key string, value interface{}, expir
 }
 
 func (c cmdable) SetRange(ctx context.Context, key string, offset int64, value string) *IntCmd {
-	cmd := NewIntCmd(ctx, "setrange", key, offset, value)
+	cmd := NewIntCmd2(ctx, "setrange", key, []interface{}{offset, value})
 	_ = c(ctx, cmd)
 	return cmd
 }
 
 func (c cmdable) StrLen(ctx context.Context, key string) *IntCmd {
-	cmd := NewIntCmd(ctx, "strlen", key)
+	cmd := NewIntCmd2(ctx, "strlen", key, nil)
 	_ = c(ctx, cmd)
 	return cmd
 }
