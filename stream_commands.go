@@ -59,8 +59,7 @@ type XAddArgs struct {
 }
 
 func (c cmdable) XAdd(ctx context.Context, a *XAddArgs) *StringCmd {
-	args := make([]interface{}, 0, 11)
-	args = append(args, "xadd", a.Stream)
+	args := make([]interface{}, 0, 9)
 	if a.NoMkStream {
 		args = append(args, "nomkstream")
 	}
@@ -86,49 +85,45 @@ func (c cmdable) XAdd(ctx context.Context, a *XAddArgs) *StringCmd {
 	} else {
 		args = append(args, "*")
 	}
-	args = appendArg(args, a.Values)
+	args, argsS := appendArg(args, a.Values)
 
-	cmd := NewStringCmd(ctx, args...)
+	cmd := NewStringCmd2Both(ctx, "xadd", a.Stream, args, argsS)
 	_ = c(ctx, cmd)
 	return cmd
 }
 
 func (c cmdable) XDel(ctx context.Context, stream string, ids ...string) *IntCmd {
-	args := []interface{}{"xdel", stream}
-	for _, id := range ids {
-		args = append(args, id)
-	}
-	cmd := NewIntCmd(ctx, args...)
+	cmd := NewIntCmd2S(ctx, "xdel", stream, ids)
 	_ = c(ctx, cmd)
 	return cmd
 }
 
 func (c cmdable) XLen(ctx context.Context, stream string) *IntCmd {
-	cmd := NewIntCmd(ctx, "xlen", stream)
+	cmd := NewIntCmd2(ctx, "xlen", stream, nil)
 	_ = c(ctx, cmd)
 	return cmd
 }
 
 func (c cmdable) XRange(ctx context.Context, stream, start, stop string) *XMessageSliceCmd {
-	cmd := NewXMessageSliceCmd(ctx, "xrange", stream, start, stop)
+	cmd := NewXMessageSliceCmd3S(ctx, "xrange", stream, start, []string{stop})
 	_ = c(ctx, cmd)
 	return cmd
 }
 
 func (c cmdable) XRangeN(ctx context.Context, stream, start, stop string, count int64) *XMessageSliceCmd {
-	cmd := NewXMessageSliceCmd(ctx, "xrange", stream, start, stop, "count", count)
+	cmd := NewXMessageSliceCmd3(ctx, "xrange", stream, start, []interface{}{stop, "count", count})
 	_ = c(ctx, cmd)
 	return cmd
 }
 
 func (c cmdable) XRevRange(ctx context.Context, stream, start, stop string) *XMessageSliceCmd {
-	cmd := NewXMessageSliceCmd(ctx, "xrevrange", stream, start, stop)
+	cmd := NewXMessageSliceCmd3S(ctx, "xrevrange", stream, start, []string{stop})
 	_ = c(ctx, cmd)
 	return cmd
 }
 
 func (c cmdable) XRevRangeN(ctx context.Context, stream, start, stop string, count int64) *XMessageSliceCmd {
-	cmd := NewXMessageSliceCmd(ctx, "xrevrange", stream, start, stop, "count", count)
+	cmd := NewXMessageSliceCmd3(ctx, "xrevrange", stream, start, []interface{}{stop, "count", count})
 	_ = c(ctx, cmd)
 	return cmd
 }
@@ -140,8 +135,7 @@ type XReadArgs struct {
 }
 
 func (c cmdable) XRead(ctx context.Context, a *XReadArgs) *XStreamSliceCmd {
-	args := make([]interface{}, 0, 6+len(a.Streams))
-	args = append(args, "xread")
+	args := make([]interface{}, 0, 5+len(a.Streams))
 
 	keyPos := int8(1)
 	if a.Count > 0 {
@@ -160,7 +154,7 @@ func (c cmdable) XRead(ctx context.Context, a *XReadArgs) *XStreamSliceCmd {
 		args = append(args, s)
 	}
 
-	cmd := NewXStreamSliceCmd(ctx, args...)
+	cmd := NewXStreamSliceCmd2(ctx, "xread", "", args)
 	if a.Block >= 0 {
 		cmd.setReadTimeout(a.Block)
 	}
@@ -177,37 +171,37 @@ func (c cmdable) XReadStreams(ctx context.Context, streams ...string) *XStreamSl
 }
 
 func (c cmdable) XGroupCreate(ctx context.Context, stream, group, start string) *StatusCmd {
-	cmd := NewStatusCmd(ctx, "xgroup", "create", stream, group, start)
+	cmd := NewStatusCmd3S(ctx, "xgroup", "create", stream, []string{group, start})
 	_ = c(ctx, cmd)
 	return cmd
 }
 
 func (c cmdable) XGroupCreateMkStream(ctx context.Context, stream, group, start string) *StatusCmd {
-	cmd := NewStatusCmd(ctx, "xgroup", "create", stream, group, start, "mkstream")
+	cmd := NewStatusCmd3S(ctx, "xgroup", "create", stream, []string{group, start, "mkstream"})
 	_ = c(ctx, cmd)
 	return cmd
 }
 
 func (c cmdable) XGroupSetID(ctx context.Context, stream, group, start string) *StatusCmd {
-	cmd := NewStatusCmd(ctx, "xgroup", "setid", stream, group, start)
+	cmd := NewStatusCmd3S(ctx, "xgroup", "setid", stream, []string{group, start})
 	_ = c(ctx, cmd)
 	return cmd
 }
 
 func (c cmdable) XGroupDestroy(ctx context.Context, stream, group string) *IntCmd {
-	cmd := NewIntCmd(ctx, "xgroup", "destroy", stream, group)
+	cmd := NewIntCmd3S(ctx, "xgroup", "destroy", stream, []string{group})
 	_ = c(ctx, cmd)
 	return cmd
 }
 
 func (c cmdable) XGroupCreateConsumer(ctx context.Context, stream, group, consumer string) *IntCmd {
-	cmd := NewIntCmd(ctx, "xgroup", "createconsumer", stream, group, consumer)
+	cmd := NewIntCmd3S(ctx, "xgroup", "createconsumer", stream, []string{group, consumer})
 	_ = c(ctx, cmd)
 	return cmd
 }
 
 func (c cmdable) XGroupDelConsumer(ctx context.Context, stream, group, consumer string) *IntCmd {
-	cmd := NewIntCmd(ctx, "xgroup", "delconsumer", stream, group, consumer)
+	cmd := NewIntCmd3S(ctx, "xgroup", "delconsumer", stream, []string{group, consumer})
 	_ = c(ctx, cmd)
 	return cmd
 }
@@ -222,8 +216,8 @@ type XReadGroupArgs struct {
 }
 
 func (c cmdable) XReadGroup(ctx context.Context, a *XReadGroupArgs) *XStreamSliceCmd {
-	args := make([]interface{}, 0, 10+len(a.Streams))
-	args = append(args, "xreadgroup", "group", a.Group, a.Consumer)
+	args := make([]interface{}, 0, 7+len(a.Streams))
+	args = append(args, a.Consumer)
 
 	keyPos := int8(4)
 	if a.Count > 0 {
@@ -244,7 +238,7 @@ func (c cmdable) XReadGroup(ctx context.Context, a *XReadGroupArgs) *XStreamSlic
 		args = append(args, s)
 	}
 
-	cmd := NewXStreamSliceCmd(ctx, args...)
+	cmd := NewXStreamSliceCmd3(ctx, "xreadgroup", "group", a.Group, args)
 	if a.Block >= 0 {
 		cmd.setReadTimeout(a.Block)
 	}
@@ -254,17 +248,13 @@ func (c cmdable) XReadGroup(ctx context.Context, a *XReadGroupArgs) *XStreamSlic
 }
 
 func (c cmdable) XAck(ctx context.Context, stream, group string, ids ...string) *IntCmd {
-	args := []interface{}{"xack", stream, group}
-	for _, id := range ids {
-		args = append(args, id)
-	}
-	cmd := NewIntCmd(ctx, args...)
+	cmd := NewIntCmd3S(ctx, "xack", stream, group, ids)
 	_ = c(ctx, cmd)
 	return cmd
 }
 
 func (c cmdable) XPending(ctx context.Context, stream, group string) *XPendingCmd {
-	cmd := NewXPendingCmd(ctx, "xpending", stream, group)
+	cmd := NewXPendingCmd3(ctx, "xpending", stream, group, nil)
 	_ = c(ctx, cmd)
 	return cmd
 }
@@ -280,8 +270,7 @@ type XPendingExtArgs struct {
 }
 
 func (c cmdable) XPendingExt(ctx context.Context, a *XPendingExtArgs) *XPendingExtCmd {
-	args := make([]interface{}, 0, 9)
-	args = append(args, "xpending", a.Stream, a.Group)
+	args := make([]interface{}, 0, 6)
 	if a.Idle != 0 {
 		args = append(args, "idle", formatMs(ctx, a.Idle))
 	}
@@ -289,7 +278,7 @@ func (c cmdable) XPendingExt(ctx context.Context, a *XPendingExtArgs) *XPendingE
 	if a.Consumer != "" {
 		args = append(args, a.Consumer)
 	}
-	cmd := NewXPendingExtCmd(ctx, args...)
+	cmd := NewXPendingExtCmd3(ctx, "xpending", a.Stream, a.Group, args)
 	_ = c(ctx, cmd)
 	return cmd
 }
@@ -305,7 +294,7 @@ type XAutoClaimArgs struct {
 
 func (c cmdable) XAutoClaim(ctx context.Context, a *XAutoClaimArgs) *XAutoClaimCmd {
 	args := xAutoClaimArgs(ctx, a)
-	cmd := NewXAutoClaimCmd(ctx, args...)
+	cmd := NewXAutoClaimCmd3(ctx, "xautoclaim", a.Stream, a.Group, args)
 	_ = c(ctx, cmd)
 	return cmd
 }
@@ -313,14 +302,14 @@ func (c cmdable) XAutoClaim(ctx context.Context, a *XAutoClaimArgs) *XAutoClaimC
 func (c cmdable) XAutoClaimJustID(ctx context.Context, a *XAutoClaimArgs) *XAutoClaimJustIDCmd {
 	args := xAutoClaimArgs(ctx, a)
 	args = append(args, "justid")
-	cmd := NewXAutoClaimJustIDCmd(ctx, args...)
+	cmd := NewXAutoClaimJustIDCmd3(ctx, "xautoclaim", a.Stream, a.Group, args)
 	_ = c(ctx, cmd)
 	return cmd
 }
 
 func xAutoClaimArgs(ctx context.Context, a *XAutoClaimArgs) []interface{} {
-	args := make([]interface{}, 0, 8)
-	args = append(args, "xautoclaim", a.Stream, a.Group, a.Consumer, formatMs(ctx, a.MinIdle), a.Start)
+	args := make([]interface{}, 0, 6)
+	args = append(args, a.Consumer, formatMs(ctx, a.MinIdle), a.Start)
 	if a.Count > 0 {
 		args = append(args, "count", a.Count)
 	}
@@ -337,7 +326,7 @@ type XClaimArgs struct {
 
 func (c cmdable) XClaim(ctx context.Context, a *XClaimArgs) *XMessageSliceCmd {
 	args := xClaimArgs(a)
-	cmd := NewXMessageSliceCmd(ctx, args...)
+	cmd := NewXMessageSliceCmd3(ctx, "xclaim", a.Stream, a.Group, args)
 	_ = c(ctx, cmd)
 	return cmd
 }
@@ -345,18 +334,14 @@ func (c cmdable) XClaim(ctx context.Context, a *XClaimArgs) *XMessageSliceCmd {
 func (c cmdable) XClaimJustID(ctx context.Context, a *XClaimArgs) *StringSliceCmd {
 	args := xClaimArgs(a)
 	args = append(args, "justid")
-	cmd := NewStringSliceCmd(ctx, args...)
+	cmd := NewStringSliceCmd3(ctx, "xclaim", a.Stream, a.Group, args)
 	_ = c(ctx, cmd)
 	return cmd
 }
 
 func xClaimArgs(a *XClaimArgs) []interface{} {
-	args := make([]interface{}, 0, 5+len(a.Messages))
-	args = append(args,
-		"xclaim",
-		a.Stream,
-		a.Group, a.Consumer,
-		int64(a.MinIdle/time.Millisecond))
+	args := make([]interface{}, 0, 2+len(a.Messages)+1)
+	args = append(args, a.Consumer, int64(a.MinIdle/time.Millisecond))
 	for _, id := range a.Messages {
 		args = append(args, id)
 	}
@@ -370,12 +355,8 @@ func xClaimArgs(a *XClaimArgs) []interface{} {
 //	XTRIM key MAXLEN/MINID ~ threshold LIMIT limit.
 //
 // The redis-server version is lower than 6.2, please set limit to 0.
-func (c cmdable) xTrim(
-	ctx context.Context, key, strategy string,
-	approx bool, threshold interface{}, limit int64,
-) *IntCmd {
-	args := make([]interface{}, 0, 7)
-	args = append(args, "xtrim", key, strategy)
+func (c cmdable) xTrim(ctx context.Context, key, strategy string, approx bool, threshold interface{}, limit int64) *IntCmd {
+	args := make([]interface{}, 0, 4)
 	if approx {
 		args = append(args, "~")
 	}
@@ -383,7 +364,7 @@ func (c cmdable) xTrim(
 	if limit > 0 {
 		args = append(args, "limit", limit)
 	}
-	cmd := NewIntCmd(ctx, args...)
+	cmd := NewIntCmd3(ctx, "xtrim", key, strategy, args)
 	_ = c(ctx, cmd)
 	return cmd
 }
@@ -427,12 +408,12 @@ func (c cmdable) XInfoStream(ctx context.Context, key string) *XInfoStreamCmd {
 // XInfoStreamFull XINFO STREAM FULL [COUNT count]
 // redis-server >= 6.0.
 func (c cmdable) XInfoStreamFull(ctx context.Context, key string, count int) *XInfoStreamFullCmd {
-	args := make([]interface{}, 0, 6)
-	args = append(args, "xinfo", "stream", key, "full")
+	args := make([]interface{}, 0, 3)
+	args = append(args, "full")
 	if count > 0 {
 		args = append(args, "count", count)
 	}
-	cmd := NewXInfoStreamFullCmd(ctx, args...)
+	cmd := NewXInfoStreamFullCmd3(ctx, "xinfo", "stream", key, args)
 	_ = c(ctx, cmd)
 	return cmd
 }

@@ -19,19 +19,13 @@ type BitMapCmdable interface {
 }
 
 func (c cmdable) GetBit(ctx context.Context, key string, offset int64) *IntCmd {
-	cmd := NewIntCmd(ctx, "getbit", key, offset)
+	cmd := NewIntCmd2(ctx, "getbit", key, []interface{}{offset})
 	_ = c(ctx, cmd)
 	return cmd
 }
 
 func (c cmdable) SetBit(ctx context.Context, key string, offset int64, value int) *IntCmd {
-	cmd := NewIntCmd(
-		ctx,
-		"setbit",
-		key,
-		offset,
-		value,
-	)
+	cmd := NewIntCmd2(ctx, "setbit", key, []interface{}{offset, value})
 	_ = c(ctx, cmd)
 	return cmd
 }
@@ -45,7 +39,7 @@ const BitCountIndexByte string = "BYTE"
 const BitCountIndexBit string = "BIT"
 
 func (c cmdable) BitCount(ctx context.Context, key string, bitCount *BitCount) *IntCmd {
-	args := []interface{}{"bitcount", key}
+	var args []interface{}
 	if bitCount != nil {
 		if bitCount.Unit == "" {
 			bitCount.Unit = "BYTE"
@@ -62,58 +56,49 @@ func (c cmdable) BitCount(ctx context.Context, key string, bitCount *BitCount) *
 			string(bitCount.Unit),
 		)
 	}
-	cmd := NewIntCmd(ctx, args...)
+	cmd := NewIntCmd2(ctx, "bitcount", key, args)
 	_ = c(ctx, cmd)
 	return cmd
 }
 
-func (c cmdable) bitOp(ctx context.Context, op, destKey string, keys ...string) *IntCmd {
-	args := make([]interface{}, 3+len(keys))
-	args[0] = "bitop"
-	args[1] = op
-	args[2] = destKey
-	for i, key := range keys {
-		args[3+i] = key
-	}
-	cmd := NewIntCmd(ctx, args...)
+func (c cmdable) bitOp(ctx context.Context, op, destKey string, keys []string) *IntCmd {
+	cmd := NewIntCmd3S(ctx, "bitop", op, destKey, keys)
 	_ = c(ctx, cmd)
 	return cmd
 }
 
 func (c cmdable) BitOpAnd(ctx context.Context, destKey string, keys ...string) *IntCmd {
-	return c.bitOp(ctx, "and", destKey, keys...)
+	return c.bitOp(ctx, "and", destKey, keys)
 }
 
 func (c cmdable) BitOpOr(ctx context.Context, destKey string, keys ...string) *IntCmd {
-	return c.bitOp(ctx, "or", destKey, keys...)
+	return c.bitOp(ctx, "or", destKey, keys)
 }
 
 func (c cmdable) BitOpXor(ctx context.Context, destKey string, keys ...string) *IntCmd {
-	return c.bitOp(ctx, "xor", destKey, keys...)
+	return c.bitOp(ctx, "xor", destKey, keys)
 }
 
 func (c cmdable) BitOpNot(ctx context.Context, destKey string, key string) *IntCmd {
-	return c.bitOp(ctx, "not", destKey, key)
+	return c.bitOp(ctx, "not", destKey, []string{key})
 }
 
 // BitPos is an API before Redis version 7.0, cmd: bitpos key bit start end
 // if you need the `byte | bit` parameter, please use `BitPosSpan`.
 func (c cmdable) BitPos(ctx context.Context, key string, bit int64, pos ...int64) *IntCmd {
-	args := make([]interface{}, 3+len(pos))
-	args[0] = "bitpos"
-	args[1] = key
-	args[2] = bit
+	args := make([]interface{}, 0, 1+len(pos))
+	args = append(args, bit)
 	switch len(pos) {
 	case 0:
 	case 1:
-		args[3] = pos[0]
+		args = append(args, pos[0])
 	case 2:
-		args[3] = pos[0]
-		args[4] = pos[1]
+		args = append(args, pos[0])
+		args = append(args, pos[1])
 	default:
 		panic("too many arguments")
 	}
-	cmd := NewIntCmd(ctx, args...)
+	cmd := NewIntCmd2(ctx, "bitpos", key, args)
 	_ = c(ctx, cmd)
 	return cmd
 }
@@ -125,7 +110,7 @@ func (c cmdable) BitPos(ctx context.Context, key string, bit int64, pos ...int64
 // span = "bit", cmd: bitpos key bit start end bit
 // span = "byte", cmd: bitpos key bit start end byte
 func (c cmdable) BitPosSpan(ctx context.Context, key string, bit int8, start, end int64, span string) *IntCmd {
-	cmd := NewIntCmd(ctx, "bitpos", key, bit, start, end, span)
+	cmd := NewIntCmd2(ctx, "bitpos", key, []interface{}{bit, start, end, span})
 	_ = c(ctx, cmd)
 	return cmd
 }
@@ -135,11 +120,7 @@ func (c cmdable) BitPosSpan(ctx context.Context, key string, bit int8, start, en
 //   - BitField([]string{"cmd1", "type1", "offset1", "value1","cmd2", "type2", "offset2", "value2"})
 //   - BitField([]interface{}{"cmd1", "type1", "offset1", "value1","cmd2", "type2", "offset2", "value2"})
 func (c cmdable) BitField(ctx context.Context, key string, values ...interface{}) *IntSliceCmd {
-	args := make([]interface{}, 2, 2+len(values))
-	args[0] = "bitfield"
-	args[1] = key
-	args = appendArgs(args, values)
-	cmd := NewIntSliceCmd(ctx, args...)
+	cmd := NewIntSliceCmd2(ctx, "bitfield", key, values)
 	_ = c(ctx, cmd)
 	return cmd
 }
@@ -148,16 +129,14 @@ func (c cmdable) BitField(ctx context.Context, key string, values ...interface{}
 // It is like the original BITFIELD but only accepts GET subcommand and can safely be used in read-only replicas.
 // - BitFieldRO(ctx, key, "<Encoding0>", "<Offset0>", "<Encoding1>","<Offset1>")
 func (c cmdable) BitFieldRO(ctx context.Context, key string, values ...interface{}) *IntSliceCmd {
-	args := make([]interface{}, 2, 2+len(values))
-	args[0] = "BITFIELD_RO"
-	args[1] = key
+	args := make([]interface{}, 0, len(values)+len(values)/2)
 	if len(values)%2 != 0 {
 		panic("BitFieldRO: invalid number of arguments, must be even")
 	}
 	for i := 0; i < len(values); i += 2 {
 		args = append(args, "GET", values[i], values[i+1])
 	}
-	cmd := NewIntSliceCmd(ctx, args...)
+	cmd := NewIntSliceCmd2(ctx, "BITFIELD_RO", key, args)
 	_ = c(ctx, cmd)
 	return cmd
 }
