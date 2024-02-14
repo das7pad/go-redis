@@ -2,7 +2,6 @@ package redis
 
 import (
 	"context"
-	"fmt"
 	"strings"
 )
 
@@ -37,24 +36,23 @@ type TFCallOptions struct {
 // TFunctionLoad - load a new JavaScript library into Redis.
 // For more information - https://redis.io/commands/tfunction-load/
 func (c cmdable) TFunctionLoad(ctx context.Context, lib string) *StatusCmd {
-	args := []interface{}{"TFUNCTION", "LOAD", lib}
-	cmd := NewStatusCmd(ctx, args...)
+	cmd := NewStatusCmd3(ctx, "TFUNCTION", "LOAD", lib, nil)
 	_ = c(ctx, cmd)
 	return cmd
 }
 
 func (c cmdable) TFunctionLoadArgs(ctx context.Context, lib string, options *TFunctionLoadOptions) *StatusCmd {
-	args := []interface{}{"TFUNCTION", "LOAD"}
+	var argsS []string
 	if options != nil {
 		if options.Replace {
-			args = append(args, "REPLACE")
+			argsS = append(argsS, "REPLACE")
 		}
 		if options.Config != "" {
-			args = append(args, "CONFIG", options.Config)
+			argsS = append(argsS, "CONFIG", options.Config)
 		}
 	}
-	args = append(args, lib)
-	cmd := NewStatusCmd(ctx, args...)
+	argsS = append(argsS, lib)
+	cmd := NewStatusCmd2S(ctx, "TFUNCTION", "LOAD", argsS)
 	_ = c(ctx, cmd)
 	return cmd
 }
@@ -62,8 +60,7 @@ func (c cmdable) TFunctionLoadArgs(ctx context.Context, lib string, options *TFu
 // TFunctionDelete - delete a JavaScript library from Redis.
 // For more information - https://redis.io/commands/tfunction-delete/
 func (c cmdable) TFunctionDelete(ctx context.Context, libName string) *StatusCmd {
-	args := []interface{}{"TFUNCTION", "DELETE", libName}
-	cmd := NewStatusCmd(ctx, args...)
+	cmd := NewStatusCmd3(ctx, "TFUNCTION", "DELETE", libName, nil)
 	_ = c(ctx, cmd)
 	return cmd
 }
@@ -71,14 +68,13 @@ func (c cmdable) TFunctionDelete(ctx context.Context, libName string) *StatusCmd
 // TFunctionList - list the functions with additional information about each function.
 // For more information - https://redis.io/commands/tfunction-list/
 func (c cmdable) TFunctionList(ctx context.Context) *MapStringInterfaceSliceCmd {
-	args := []interface{}{"TFUNCTION", "LIST"}
-	cmd := NewMapStringInterfaceSliceCmd(ctx, args...)
+	cmd := NewMapStringInterfaceSliceCmd2(ctx, "TFUNCTION", "LIST", nil)
 	_ = c(ctx, cmd)
 	return cmd
 }
 
 func (c cmdable) TFunctionListArgs(ctx context.Context, options *TFunctionListOptions) *MapStringInterfaceSliceCmd {
-	args := []interface{}{"TFUNCTION", "LIST"}
+	var args []interface{}
 	if options != nil {
 		if options.Withcode {
 			args = append(args, "WITHCODE")
@@ -91,7 +87,7 @@ func (c cmdable) TFunctionListArgs(ctx context.Context, options *TFunctionListOp
 			args = append(args, "LIBRARY", options.Library)
 		}
 	}
-	cmd := NewMapStringInterfaceSliceCmd(ctx, args...)
+	cmd := NewMapStringInterfaceSliceCmd2(ctx, "TFUNCTION", "LIST", args)
 	_ = c(ctx, cmd)
 	return cmd
 }
@@ -99,16 +95,13 @@ func (c cmdable) TFunctionListArgs(ctx context.Context, options *TFunctionListOp
 // TFCall - invoke a function.
 // For more information - https://redis.io/commands/tfcall/
 func (c cmdable) TFCall(ctx context.Context, libName string, funcName string, numKeys int) *Cmd {
-	lf := libName + "." + funcName
-	args := []interface{}{"TFCALL", lf, numKeys}
-	cmd := NewCmd(ctx, args...)
+	cmd := NewCmd2(ctx, "TFCALL", libName+"."+funcName, []interface{}{numKeys})
 	_ = c(ctx, cmd)
 	return cmd
 }
 
 func (c cmdable) TFCallArgs(ctx context.Context, libName string, funcName string, numKeys int, options *TFCallOptions) *Cmd {
-	lf := libName + "." + funcName
-	args := []interface{}{"TFCALL", lf, numKeys}
+	args := []interface{}{numKeys}
 	if options != nil {
 		for _, key := range options.Keys {
 			args = append(args, key)
@@ -117,7 +110,7 @@ func (c cmdable) TFCallArgs(ctx context.Context, libName string, funcName string
 			args = append(args, key)
 		}
 	}
-	cmd := NewCmd(ctx, args...)
+	cmd := NewCmd2(ctx, "TFCALL", libName+"."+funcName, args)
 	_ = c(ctx, cmd)
 	return cmd
 }
@@ -125,16 +118,13 @@ func (c cmdable) TFCallArgs(ctx context.Context, libName string, funcName string
 // TFCallASYNC - invoke an asynchronous JavaScript function (coroutine).
 // For more information - https://redis.io/commands/TFCallASYNC/
 func (c cmdable) TFCallASYNC(ctx context.Context, libName string, funcName string, numKeys int) *Cmd {
-	lf := fmt.Sprintf("%s.%s", libName, funcName)
-	args := []interface{}{"TFCALLASYNC", lf, numKeys}
-	cmd := NewCmd(ctx, args...)
+	cmd := NewCmd2(ctx, "TFCALLASYNC", libName+"."+funcName, []interface{}{numKeys})
 	_ = c(ctx, cmd)
 	return cmd
 }
 
 func (c cmdable) TFCallASYNCArgs(ctx context.Context, libName string, funcName string, numKeys int, options *TFCallOptions) *Cmd {
-	lf := fmt.Sprintf("%s.%s", libName, funcName)
-	args := []interface{}{"TFCALLASYNC", lf, numKeys}
+	args := []interface{}{numKeys}
 	if options != nil {
 		for _, key := range options.Keys {
 			args = append(args, key)
@@ -143,7 +133,7 @@ func (c cmdable) TFCallASYNCArgs(ctx context.Context, libName string, funcName s
 			args = append(args, key)
 		}
 	}
-	cmd := NewCmd(ctx, args...)
+	cmd := NewCmd2(ctx, "TFCALLASYNC", libName+"."+funcName, args)
 	_ = c(ctx, cmd)
 	return cmd
 }

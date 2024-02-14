@@ -30,103 +30,101 @@ type ClusterCmdable interface {
 }
 
 func (c cmdable) ClusterMyShardID(ctx context.Context) *StringCmd {
-	cmd := NewStringCmd(ctx, "cluster", "myshardid")
+	cmd := NewStringCmd2(ctx, "cluster", "myshardid", nil)
 	_ = c(ctx, cmd)
 	return cmd
 }
 
 func (c cmdable) ClusterSlots(ctx context.Context) *ClusterSlotsCmd {
-	cmd := NewClusterSlotsCmd(ctx, "cluster", "slots")
+	cmd := NewClusterSlotsCmd2(ctx, "cluster", "slots", nil)
 	_ = c(ctx, cmd)
 	return cmd
 }
 
 func (c cmdable) ClusterShards(ctx context.Context) *ClusterShardsCmd {
-	cmd := NewClusterShardsCmd(ctx, "cluster", "shards")
+	cmd := NewClusterShardsCmd2(ctx, "cluster", "shards", nil)
 	_ = c(ctx, cmd)
 	return cmd
 }
 
 func (c cmdable) ClusterLinks(ctx context.Context) *ClusterLinksCmd {
-	cmd := NewClusterLinksCmd(ctx, "cluster", "links")
+	cmd := NewClusterLinksCmd2(ctx, "cluster", "links", nil)
 	_ = c(ctx, cmd)
 	return cmd
 }
 
 func (c cmdable) ClusterNodes(ctx context.Context) *StringCmd {
-	cmd := NewStringCmd(ctx, "cluster", "nodes")
+	cmd := NewStringCmd2(ctx, "cluster", "nodes", nil)
 	_ = c(ctx, cmd)
 	return cmd
 }
 
 func (c cmdable) ClusterMeet(ctx context.Context, host, port string) *StatusCmd {
-	cmd := NewStatusCmd(ctx, "cluster", "meet", host, port)
+	cmd := NewStatusCmd3S(ctx, "cluster", "meet", host, []string{port})
 	_ = c(ctx, cmd)
 	return cmd
 }
 
 func (c cmdable) ClusterForget(ctx context.Context, nodeID string) *StatusCmd {
-	cmd := NewStatusCmd(ctx, "cluster", "forget", nodeID)
+	cmd := NewStatusCmd3(ctx, "cluster", "forget", nodeID, nil)
 	_ = c(ctx, cmd)
 	return cmd
 }
 
 func (c cmdable) ClusterReplicate(ctx context.Context, nodeID string) *StatusCmd {
-	cmd := NewStatusCmd(ctx, "cluster", "replicate", nodeID)
+	cmd := NewStatusCmd3(ctx, "cluster", "replicate", nodeID, nil)
 	_ = c(ctx, cmd)
 	return cmd
 }
 
 func (c cmdable) ClusterResetSoft(ctx context.Context) *StatusCmd {
-	cmd := NewStatusCmd(ctx, "cluster", "reset", "soft")
+	cmd := NewStatusCmd3(ctx, "cluster", "reset", "soft", nil)
 	_ = c(ctx, cmd)
 	return cmd
 }
 
 func (c cmdable) ClusterResetHard(ctx context.Context) *StatusCmd {
-	cmd := NewStatusCmd(ctx, "cluster", "reset", "hard")
+	cmd := NewStatusCmd3(ctx, "cluster", "reset", "hard", nil)
 	_ = c(ctx, cmd)
 	return cmd
 }
 
 func (c cmdable) ClusterInfo(ctx context.Context) *StringCmd {
-	cmd := NewStringCmd(ctx, "cluster", "info")
+	cmd := NewStringCmd2(ctx, "cluster", "info", nil)
 	_ = c(ctx, cmd)
 	return cmd
 }
 
 func (c cmdable) ClusterKeySlot(ctx context.Context, key string) *IntCmd {
-	cmd := NewIntCmd(ctx, "cluster", "keyslot", key)
+	cmd := NewIntCmd3(ctx, "cluster", "keyslot", key, nil)
 	_ = c(ctx, cmd)
 	return cmd
 }
 
 func (c cmdable) ClusterGetKeysInSlot(ctx context.Context, slot int, count int) *StringSliceCmd {
-	cmd := NewStringSliceCmd(ctx, "cluster", "getkeysinslot", slot, count)
+	cmd := NewStringSliceCmd2(ctx, "cluster", "getkeysinslot", []interface{}{slot, count})
 	_ = c(ctx, cmd)
 	return cmd
 }
 
 func (c cmdable) ClusterCountFailureReports(ctx context.Context, nodeID string) *IntCmd {
-	cmd := NewIntCmd(ctx, "cluster", "count-failure-reports", nodeID)
+	cmd := NewIntCmd3(ctx, "cluster", "count-failure-reports", nodeID, nil)
 	_ = c(ctx, cmd)
 	return cmd
 }
 
 func (c cmdable) ClusterCountKeysInSlot(ctx context.Context, slot int) *IntCmd {
-	cmd := NewIntCmd(ctx, "cluster", "countkeysinslot", slot)
+	cmd := NewIntCmd2(ctx, "cluster", "countkeysinslot", []interface{}{slot})
 	_ = c(ctx, cmd)
 	return cmd
 }
 
 func (c cmdable) ClusterDelSlots(ctx context.Context, slots ...int) *StatusCmd {
-	args := make([]interface{}, 2+len(slots))
-	args[0] = "cluster"
-	args[1] = "delslots"
+	args := make([]interface{}, len(slots))
 	for i, slot := range slots {
-		args[2+i] = slot
+		args[i] = slot
 	}
-	cmd := NewStatusCmd(ctx, args...)
+	cmd := NewStatusCmd2(ctx, "cluster", "delslots", args)
 	_ = c(ctx, cmd)
 	return cmd
 }
@@ -141,31 +139,29 @@ func (c cmdable) ClusterDelSlotsRange(ctx context.Context, min, max int) *Status
 }
 
 func (c cmdable) ClusterSaveConfig(ctx context.Context) *StatusCmd {
-	cmd := NewStatusCmd(ctx, "cluster", "saveconfig")
+	cmd := NewStatusCmd2(ctx, "cluster", "saveconfig", nil)
 	_ = c(ctx, cmd)
 	return cmd
 }
 
 func (c cmdable) ClusterSlaves(ctx context.Context, nodeID string) *StringSliceCmd {
-	cmd := NewStringSliceCmd(ctx, "cluster", "slaves", nodeID)
+	cmd := NewStringSliceCmd3(ctx, "cluster", "slaves", nodeID, nil)
 	_ = c(ctx, cmd)
 	return cmd
 }
 
 func (c cmdable) ClusterFailover(ctx context.Context) *StatusCmd {
-	cmd := NewStatusCmd(ctx, "cluster", "failover")
+	cmd := NewStatusCmd2(ctx, "cluster", "failover", nil)
 	_ = c(ctx, cmd)
 	return cmd
 }
 
 func (c cmdable) ClusterAddSlots(ctx context.Context, slots ...int) *StatusCmd {
-	args := make([]interface{}, 2+len(slots))
-	args[0] = "cluster"
-	args[1] = "addslots"
+	args := make([]interface{}, len(slots))
 	for i, num := range slots {
-		args[2+i] = num
+		args[i] = num
 	}
-	cmd := NewStatusCmd(ctx, args...)
+	cmd := NewStatusCmd2(ctx, "cluster", "addslots", args)
 	_ = c(ctx, cmd)
 	return cmd
 }
@@ -180,13 +176,13 @@ func (c cmdable) ClusterAddSlotsRange(ctx context.Context, min, max int) *Status
 }
 
 func (c cmdable) ReadOnly(ctx context.Context) *StatusCmd {
-	cmd := NewStatusCmd(ctx, "readonly")
+	cmd := NewStatusCmd2(ctx, "readonly", "", nil)
 	_ = c(ctx, cmd)
 	return cmd
 }
 
 func (c cmdable) ReadWrite(ctx context.Context) *StatusCmd {
-	cmd := NewStatusCmd(ctx, "readwrite")
+	cmd := NewStatusCmd2(ctx, "readwrite", "", nil)
 	_ = c(ctx, cmd)
 	return cmd
 }

@@ -47,40 +47,25 @@ type GenericCmdable interface {
 }
 
 func (c cmdable) Del(ctx context.Context, keys ...string) *IntCmd {
-	args := make([]interface{}, 1+len(keys))
-	args[0] = "del"
-	for i, key := range keys {
-		args[1+i] = key
-	}
-	cmd := NewIntCmd(ctx, args...)
+	cmd := NewIntCmd2S(ctx, "del", "", keys)
 	_ = c(ctx, cmd)
 	return cmd
 }
 
 func (c cmdable) Unlink(ctx context.Context, keys ...string) *IntCmd {
-	args := make([]interface{}, 1+len(keys))
-	args[0] = "unlink"
-	for i, key := range keys {
-		args[1+i] = key
-	}
-	cmd := NewIntCmd(ctx, args...)
+	cmd := NewIntCmd2S(ctx, "unlink", "", keys)
 	_ = c(ctx, cmd)
 	return cmd
 }
 
 func (c cmdable) Dump(ctx context.Context, key string) *StringCmd {
-	cmd := NewStringCmd(ctx, "dump", key)
+	cmd := NewStringCmd2(ctx, "dump", key, nil)
 	_ = c(ctx, cmd)
 	return cmd
 }
 
 func (c cmdable) Exists(ctx context.Context, keys ...string) *IntCmd {
-	args := make([]interface{}, 1+len(keys))
-	args[0] = "exists"
-	for i, key := range keys {
-		args[1+i] = key
-	}
-	cmd := NewIntCmd(ctx, args...)
+	cmd := NewIntCmd2S(ctx, "exists", "", keys)
 	_ = c(ctx, cmd)
 	return cmd
 }
@@ -105,49 +90,43 @@ func (c cmdable) ExpireLT(ctx context.Context, key string, expiration time.Durat
 	return c.expire(ctx, key, expiration, "LT")
 }
 
-func (c cmdable) expire(
-	ctx context.Context, key string, expiration time.Duration, mode string,
-) *BoolCmd {
-	args := make([]interface{}, 3, 4)
-	args[0] = "expire"
-	args[1] = key
-	args[2] = formatSec(ctx, expiration)
+func (c cmdable) expire(ctx context.Context, key string, expiration time.Duration, mode string) *BoolCmd {
+	args := make([]interface{}, 0, 2)
+	args = append(args, formatSec(ctx, expiration))
 	if mode != "" {
 		args = append(args, mode)
 	}
 
-	cmd := NewBoolCmd(ctx, args...)
+	cmd := NewBoolCmd2(ctx, "expire", key, args)
 	_ = c(ctx, cmd)
 	return cmd
 }
 
 func (c cmdable) ExpireAt(ctx context.Context, key string, tm time.Time) *BoolCmd {
-	cmd := NewBoolCmd(ctx, "expireat", key, tm.Unix())
+	cmd := NewBoolCmd2(ctx, "expireat", key, []interface{}{tm.Unix()})
 	_ = c(ctx, cmd)
 	return cmd
 }
 
 func (c cmdable) ExpireTime(ctx context.Context, key string) *DurationCmd {
-	cmd := NewDurationCmd(ctx, time.Second, "expiretime", key)
+	cmd := NewDurationCmd2(ctx, time.Second, "expiretime", key, nil)
 	_ = c(ctx, cmd)
 	return cmd
 }
 
 func (c cmdable) Keys(ctx context.Context, pattern string) *StringSliceCmd {
-	cmd := NewStringSliceCmd(ctx, "keys", pattern)
+	cmd := NewStringSliceCmd2(ctx, "keys", pattern, nil)
 	_ = c(ctx, cmd)
 	return cmd
 }
 
 func (c cmdable) Migrate(ctx context.Context, host, port, key string, db int, timeout time.Duration) *StatusCmd {
-	cmd := NewStatusCmd(
+	cmd := NewStatusCmd3(
 		ctx,
 		"migrate",
 		host,
 		port,
-		key,
-		db,
-		formatMs(ctx, timeout),
+		[]interface{}{key, db, formatMs(ctx, timeout)},
 	)
 	cmd.setReadTimeout(timeout)
 	_ = c(ctx, cmd)
@@ -155,7 +134,7 @@ func (c cmdable) Migrate(ctx context.Context, host, port, key string, db int, ti
 }
 
 func (c cmdable) Move(ctx context.Context, key string, db int) *BoolCmd {
-	cmd := NewBoolCmd(ctx, "move", key, db)
+	cmd := NewBoolCmd2(ctx, "move", key, []interface{}{db})
 	_ = c(ctx, cmd)
 	return cmd
 }
@@ -167,96 +146,93 @@ func (c cmdable) ObjectFreq(ctx context.Context, key string) *IntCmd {
 }
 
 func (c cmdable) ObjectRefCount(ctx context.Context, key string) *IntCmd {
-	cmd := NewIntCmd(ctx, "object", "refcount", key)
+	cmd := NewIntCmd3(ctx, "object", "refcount", key, nil)
 	_ = c(ctx, cmd)
 	return cmd
 }
 
 func (c cmdable) ObjectEncoding(ctx context.Context, key string) *StringCmd {
-	cmd := NewStringCmd(ctx, "object", "encoding", key)
+	cmd := NewStringCmd3(ctx, "object", "encoding", key, nil)
 	_ = c(ctx, cmd)
 	return cmd
 }
 
 func (c cmdable) ObjectIdleTime(ctx context.Context, key string) *DurationCmd {
-	cmd := NewDurationCmd(ctx, time.Second, "object", "idletime", key)
+	cmd := NewDurationCmd3(ctx, time.Second, "object", "idletime", key, nil)
 	_ = c(ctx, cmd)
 	return cmd
 }
 
 func (c cmdable) Persist(ctx context.Context, key string) *BoolCmd {
-	cmd := NewBoolCmd(ctx, "persist", key)
+	cmd := NewBoolCmd2(ctx, "persist", key, nil)
 	_ = c(ctx, cmd)
 	return cmd
 }
 
 func (c cmdable) PExpire(ctx context.Context, key string, expiration time.Duration) *BoolCmd {
-	cmd := NewBoolCmd(ctx, "pexpire", key, formatMs(ctx, expiration))
+	cmd := NewBoolCmd2(ctx, "pexpire", key, []interface{}{formatMs(ctx, expiration)})
 	_ = c(ctx, cmd)
 	return cmd
 }
 
 func (c cmdable) PExpireAt(ctx context.Context, key string, tm time.Time) *BoolCmd {
-	cmd := NewBoolCmd(
+	cmd := NewBoolCmd2(
 		ctx,
 		"pexpireat",
 		key,
-		tm.UnixNano()/int64(time.Millisecond),
+		[]interface{}{tm.UnixNano() / int64(time.Millisecond)},
 	)
 	_ = c(ctx, cmd)
 	return cmd
 }
 
 func (c cmdable) PExpireTime(ctx context.Context, key string) *DurationCmd {
-	cmd := NewDurationCmd(ctx, time.Millisecond, "pexpiretime", key)
+	cmd := NewDurationCmd2(ctx, time.Millisecond, "pexpiretime", key, nil)
 	_ = c(ctx, cmd)
 	return cmd
 }
 
 func (c cmdable) PTTL(ctx context.Context, key string) *DurationCmd {
-	cmd := NewDurationCmd(ctx, time.Millisecond, "pttl", key)
+	cmd := NewDurationCmd2(ctx, time.Millisecond, "pttl", key, nil)
 	_ = c(ctx, cmd)
 	return cmd
 }
 
 func (c cmdable) RandomKey(ctx context.Context) *StringCmd {
-	cmd := NewStringCmd(ctx, "randomkey")
+	cmd := NewStringCmd2(ctx, "randomkey", "", nil)
 	_ = c(ctx, cmd)
 	return cmd
 }
 
 func (c cmdable) Rename(ctx context.Context, key, newkey string) *StatusCmd {
-	cmd := NewStatusCmd(ctx, "rename", key, newkey)
+	cmd := NewStatusCmd3(ctx, "rename", key, newkey, nil)
 	_ = c(ctx, cmd)
 	return cmd
 }
 
 func (c cmdable) RenameNX(ctx context.Context, key, newkey string) *BoolCmd {
-	cmd := NewBoolCmd(ctx, "renamenx", key, newkey)
+	cmd := NewBoolCmd3(ctx, "renamenx", key, newkey, nil)
 	_ = c(ctx, cmd)
 	return cmd
 }
 
 func (c cmdable) Restore(ctx context.Context, key string, ttl time.Duration, value string) *StatusCmd {
-	cmd := NewStatusCmd(
+	cmd := NewStatusCmd2(
 		ctx,
 		"restore",
 		key,
-		formatMs(ctx, ttl),
-		value,
+		[]interface{}{formatMs(ctx, ttl), value},
 	)
 	_ = c(ctx, cmd)
 	return cmd
 }
 
 func (c cmdable) RestoreReplace(ctx context.Context, key string, ttl time.Duration, value string) *StatusCmd {
-	cmd := NewStatusCmd(
+	cmd := NewStatusCmd2(
 		ctx,
 		"restore",
 		key,
-		formatMs(ctx, ttl),
-		value,
-		"replace",
+		[]interface{}{formatMs(ctx, ttl), value, "replace"},
 	)
 	_ = c(ctx, cmd)
 	return cmd
@@ -270,9 +246,8 @@ type Sort struct {
 	Alpha         bool
 }
 
-func (sort *Sort) args(command, key string) []interface{} {
-	args := []interface{}{command, key}
-
+func (sort *Sort) args() []interface{} {
+	var args []interface{}
 	if sort.By != "" {
 		args = append(args, "by", sort.By)
 	}
@@ -292,83 +267,78 @@ func (sort *Sort) args(command, key string) []interface{} {
 }
 
 func (c cmdable) SortRO(ctx context.Context, key string, sort *Sort) *StringSliceCmd {
-	cmd := NewStringSliceCmd(ctx, sort.args("sort_ro", key)...)
+	cmd := NewStringSliceCmd2(ctx, "sort_ro", key, sort.args())
 	_ = c(ctx, cmd)
 	return cmd
 }
 
 func (c cmdable) Sort(ctx context.Context, key string, sort *Sort) *StringSliceCmd {
-	cmd := NewStringSliceCmd(ctx, sort.args("sort", key)...)
+	cmd := NewStringSliceCmd2(ctx, "sort", key, sort.args())
 	_ = c(ctx, cmd)
 	return cmd
 }
 
 func (c cmdable) SortStore(ctx context.Context, key, store string, sort *Sort) *IntCmd {
-	args := sort.args("sort", key)
+	args := sort.args()
 	if store != "" {
 		args = append(args, "store", store)
 	}
-	cmd := NewIntCmd(ctx, args...)
+	cmd := NewIntCmd2(ctx, "sort", key, args)
 	_ = c(ctx, cmd)
 	return cmd
 }
 
 func (c cmdable) SortInterfaces(ctx context.Context, key string, sort *Sort) *SliceCmd {
-	cmd := NewSliceCmd(ctx, sort.args("sort", key)...)
+	cmd := NewSliceCmd2(ctx, "sort", key, sort.args())
 	_ = c(ctx, cmd)
 	return cmd
 }
 
 func (c cmdable) Touch(ctx context.Context, keys ...string) *IntCmd {
-	args := make([]interface{}, len(keys)+1)
-	args[0] = "touch"
-	for i, key := range keys {
-		args[i+1] = key
-	}
-	cmd := NewIntCmd(ctx, args...)
+	cmd := NewIntCmd2S(ctx, "touch", "", keys)
 	_ = c(ctx, cmd)
 	return cmd
 }
 
 func (c cmdable) TTL(ctx context.Context, key string) *DurationCmd {
-	cmd := NewDurationCmd(ctx, time.Second, "ttl", key)
+	cmd := NewDurationCmd2(ctx, time.Second, "ttl", key, nil)
 	_ = c(ctx, cmd)
 	return cmd
 }
 
 func (c cmdable) Type(ctx context.Context, key string) *StatusCmd {
-	cmd := NewStatusCmd(ctx, "type", key)
+	cmd := NewStatusCmd2(ctx, "type", key, nil)
 	_ = c(ctx, cmd)
 	return cmd
 }
 
 func (c cmdable) Copy(ctx context.Context, sourceKey, destKey string, db int, replace bool) *IntCmd {
-	args := []interface{}{"copy", sourceKey, destKey, "DB", db}
+	args := []interface{}{"DB", db}
 	if replace {
 		args = append(args, "REPLACE")
 	}
-	cmd := NewIntCmd(ctx, args...)
+	cmd := NewIntCmd3(ctx, "copy", sourceKey, destKey, args)
 	_ = c(ctx, cmd)
 	return cmd
 }
 
-//------------------------------------------------------------------------------
+// ------------------------------------------------------------------------------
 
 func (c cmdable) Scan(ctx context.Context, cursor uint64, match string, count int64) *ScanCmd {
-	args := []interface{}{"scan", cursor}
+	args := []interface{}{cursor}
 	if match != "" {
 		args = append(args, "match", match)
 	}
 	if count > 0 {
 		args = append(args, "count", count)
 	}
-	cmd := NewScanCmd(ctx, c, args...)
+	cmd := NewScanCmd2(ctx, c, "scan", "", args)
 	_ = c(ctx, cmd)
 	return cmd
 }
 
 func (c cmdable) ScanType(ctx context.Context, cursor uint64, match string, count int64, keyType string) *ScanCmd {
-	args := []interface{}{"scan", cursor}
+	args := []interface{}{cursor}
 	if match != "" {
 		args = append(args, "match", match)
 	}
@@ -378,7 +348,7 @@ func (c cmdable) ScanType(ctx context.Context, cursor uint64, match string, coun
 	if keyType != "" {
 		args = append(args, "type", keyType)
 	}
-	cmd := NewScanCmd(ctx, c, args...)
+	cmd := NewScanCmd2(ctx, c, "scan", "", args)
 	_ = c(ctx, cmd)
 	return cmd
 }

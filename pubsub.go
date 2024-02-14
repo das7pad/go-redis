@@ -307,11 +307,11 @@ func (c *PubSub) subscribe(ctx context.Context, redisCmd string, channels ...str
 }
 
 func (c *PubSub) Ping(ctx context.Context, payload ...string) error {
-	args := []interface{}{"ping"}
+	var firstArg string
 	if len(payload) == 1 {
-		args = append(args, payload[0])
+		firstArg = payload[0]
 	}
-	cmd := NewCmd(ctx, args...)
+	cmd := NewCmd2(ctx, "ping", firstArg, nil)
 
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -422,7 +422,7 @@ func (c *PubSub) newMessage(reply interface{}) (interface{}, error) {
 // Channel should be used instead.
 func (c *PubSub) ReceiveTimeout(ctx context.Context, timeout time.Duration) (interface{}, error) {
 	if c.cmd == nil {
-		c.cmd = NewCmd(ctx)
+		c.cmd = NewCmd2(ctx, "", "", nil)
 	}
 
 	// Don't hold the lock to allow subscriptions and pings.
@@ -483,7 +483,7 @@ func (c *PubSub) getContext() context.Context {
 	return context.Background()
 }
 
-//------------------------------------------------------------------------------
+// ------------------------------------------------------------------------------
 
 // Channel returns a Go channel for concurrently receiving messages.
 // The channel is closed together with the PubSub. If the Go channel

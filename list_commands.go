@@ -2,6 +2,7 @@ package redis
 
 import (
 	"context"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -37,53 +38,42 @@ type ListCmdable interface {
 }
 
 func (c cmdable) BLPop(ctx context.Context, timeout time.Duration, keys ...string) *StringSliceCmd {
-	args := make([]interface{}, 1+len(keys)+1)
-	args[0] = "blpop"
-	for i, key := range keys {
-		args[1+i] = key
-	}
-	args[len(args)-1] = formatSec(ctx, timeout)
-	cmd := NewStringSliceCmd(ctx, args...)
+	argsS := append(keys, strconv.FormatInt(formatSec(ctx, timeout), 10))
+	cmd := NewStringSliceCmd2S(ctx, "blpop", "", argsS)
 	cmd.setReadTimeout(timeout)
 	_ = c(ctx, cmd)
 	return cmd
 }
 
 func (c cmdable) BLMPop(ctx context.Context, timeout time.Duration, direction string, count int64, keys ...string) *KeyValuesCmd {
-	args := make([]interface{}, 3+len(keys), 6+len(keys))
-	args[0] = "blmpop"
-	args[1] = formatSec(ctx, timeout)
-	args[2] = len(keys)
+	args := make([]interface{}, 2+len(keys), 5+len(keys))
+	args[0] = formatSec(ctx, timeout)
+	args[1] = len(keys)
 	for i, key := range keys {
-		args[3+i] = key
+		args[i+2] = key
 	}
 	args = append(args, strings.ToLower(direction), "count", count)
-	cmd := NewKeyValuesCmd(ctx, args...)
+	cmd := NewKeyValuesCmd2(ctx, "blmpop", "", args)
 	cmd.setReadTimeout(timeout)
 	_ = c(ctx, cmd)
 	return cmd
 }
 
 func (c cmdable) BRPop(ctx context.Context, timeout time.Duration, keys ...string) *StringSliceCmd {
-	args := make([]interface{}, 1+len(keys)+1)
-	args[0] = "brpop"
-	for i, key := range keys {
-		args[1+i] = key
-	}
-	args[len(keys)+1] = formatSec(ctx, timeout)
-	cmd := NewStringSliceCmd(ctx, args...)
+	argsS := append(keys, strconv.FormatInt(formatSec(ctx, timeout), 10))
+	cmd := NewStringSliceCmd2S(ctx, "brpop", "", argsS)
 	cmd.setReadTimeout(timeout)
 	_ = c(ctx, cmd)
 	return cmd
 }
 
 func (c cmdable) BRPopLPush(ctx context.Context, source, destination string, timeout time.Duration) *StringCmd {
-	cmd := NewStringCmd(
+	cmd := NewStringCmd3(
 		ctx,
 		"brpoplpush",
 		source,
 		destination,
-		formatSec(ctx, timeout),
+		[]interface{}{formatSec(ctx, timeout)},
 	)
 	cmd.setReadTimeout(timeout)
 	_ = c(ctx, cmd)
@@ -91,7 +81,7 @@ func (c cmdable) BRPopLPush(ctx context.Context, source, destination string, tim
 }
 
 func (c cmdable) LIndex(ctx context.Context, key string, index int64) *StringCmd {
-	cmd := NewStringCmd(ctx, "lindex", key, index)
+	cmd := NewStringCmd2(ctx, "lindex", key, []interface{}{index})
 	_ = c(ctx, cmd)
 	return cmd
 }
@@ -100,50 +90,49 @@ func (c cmdable) LIndex(ctx context.Context, key string, index int64) *StringCmd
 // direction: left or right, count: > 0
 // example: client.LMPop(ctx, "left", 3, "key1", "key2")
 func (c cmdable) LMPop(ctx context.Context, direction string, count int64, keys ...string) *KeyValuesCmd {
-	args := make([]interface{}, 2+len(keys), 5+len(keys))
-	args[0] = "lmpop"
-	args[1] = len(keys)
+	args := make([]interface{}, 1+len(keys), 4+len(keys))
+	args[0] = len(keys)
 	for i, key := range keys {
-		args[2+i] = key
+		args[i+1] = key
 	}
 	args = append(args, strings.ToLower(direction), "count", count)
-	cmd := NewKeyValuesCmd(ctx, args...)
+	cmd := NewKeyValuesCmd2(ctx, "lmpop", "", args)
 	_ = c(ctx, cmd)
 	return cmd
 }
 
 func (c cmdable) LInsert(ctx context.Context, key, op string, pivot, value interface{}) *IntCmd {
-	cmd := NewIntCmd(ctx, "linsert", key, op, pivot, value)
+	cmd := NewIntCmd3(ctx, "linsert", key, op, []interface{}{pivot, value})
 	_ = c(ctx, cmd)
 	return cmd
 }
 
 func (c cmdable) LInsertBefore(ctx context.Context, key string, pivot, value interface{}) *IntCmd {
-	cmd := NewIntCmd(ctx, "linsert", key, "before", pivot, value)
+	cmd := NewIntCmd3(ctx, "linsert", key, "before", []interface{}{pivot, value})
 	_ = c(ctx, cmd)
 	return cmd
 }
 
 func (c cmdable) LInsertAfter(ctx context.Context, key string, pivot, value interface{}) *IntCmd {
-	cmd := NewIntCmd(ctx, "linsert", key, "after", pivot, value)
+	cmd := NewIntCmd3(ctx, "linsert", key, "after", []interface{}{pivot, value})
 	_ = c(ctx, cmd)
 	return cmd
 }
 
 func (c cmdable) LLen(ctx context.Context, key string) *IntCmd {
-	cmd := NewIntCmd(ctx, "llen", key)
+	cmd := NewIntCmd2(ctx, "llen", key, nil)
 	_ = c(ctx, cmd)
 	return cmd
 }
 
 func (c cmdable) LPop(ctx context.Context, key string) *StringCmd {
-	cmd := NewStringCmd(ctx, "lpop", key)
+	cmd := NewStringCmd2(ctx, "lpop", key, nil)
 	_ = c(ctx, cmd)
 	return cmd
 }
 
 func (c cmdable) LPopCount(ctx context.Context, key string, count int) *StringSliceCmd {
-	cmd := NewStringSliceCmd(ctx, "lpop", key, count)
+	cmd := NewStringSliceCmd2(ctx, "lpop", key, []interface{}{count})
 	_ = c(ctx, cmd)
 	return cmd
 }
@@ -153,7 +142,7 @@ type LPosArgs struct {
 }
 
 func (c cmdable) LPos(ctx context.Context, key string, value string, a LPosArgs) *IntCmd {
-	args := []interface{}{"lpos", key, value}
+	var args []interface{}
 	if a.Rank != 0 {
 		args = append(args, "rank", a.Rank)
 	}
@@ -161,128 +150,108 @@ func (c cmdable) LPos(ctx context.Context, key string, value string, a LPosArgs)
 		args = append(args, "maxlen", a.MaxLen)
 	}
 
-	cmd := NewIntCmd(ctx, args...)
+	cmd := NewIntCmd3(ctx, "lpos", key, value, args)
 	_ = c(ctx, cmd)
 	return cmd
 }
 
 func (c cmdable) LPosCount(ctx context.Context, key string, value string, count int64, a LPosArgs) *IntSliceCmd {
-	args := []interface{}{"lpos", key, value, "count", count}
+	args := []interface{}{value, "count", count}
 	if a.Rank != 0 {
 		args = append(args, "rank", a.Rank)
 	}
 	if a.MaxLen != 0 {
 		args = append(args, "maxlen", a.MaxLen)
 	}
-	cmd := NewIntSliceCmd(ctx, args...)
+	cmd := NewIntSliceCmd2(ctx, "lpos", key, args)
 	_ = c(ctx, cmd)
 	return cmd
 }
 
 func (c cmdable) LPush(ctx context.Context, key string, values ...interface{}) *IntCmd {
-	args := make([]interface{}, 2, 2+len(values))
-	args[0] = "lpush"
-	args[1] = key
-	args = appendArgs(args, values)
-	cmd := NewIntCmd(ctx, args...)
+	cmd := NewIntCmd2Any(ctx, "lpush", key, values)
 	_ = c(ctx, cmd)
 	return cmd
 }
 
 func (c cmdable) LPushX(ctx context.Context, key string, values ...interface{}) *IntCmd {
-	args := make([]interface{}, 2, 2+len(values))
-	args[0] = "lpushx"
-	args[1] = key
-	args = appendArgs(args, values)
-	cmd := NewIntCmd(ctx, args...)
+	cmd := NewIntCmd2Any(ctx, "lpushx", key, values)
 	_ = c(ctx, cmd)
 	return cmd
 }
 
 func (c cmdable) LRange(ctx context.Context, key string, start, stop int64) *StringSliceCmd {
-	cmd := NewStringSliceCmd(
+	cmd := NewStringSliceCmd2(
 		ctx,
 		"lrange",
 		key,
-		start,
-		stop,
+		[]interface{}{start, stop},
 	)
 	_ = c(ctx, cmd)
 	return cmd
 }
 
 func (c cmdable) LRem(ctx context.Context, key string, count int64, value interface{}) *IntCmd {
-	cmd := NewIntCmd(ctx, "lrem", key, count, value)
+	cmd := NewIntCmd2(ctx, "lrem", key, []interface{}{count, value})
 	_ = c(ctx, cmd)
 	return cmd
 }
 
 func (c cmdable) LSet(ctx context.Context, key string, index int64, value interface{}) *StatusCmd {
-	cmd := NewStatusCmd(ctx, "lset", key, index, value)
+	cmd := NewStatusCmd2(ctx, "lset", key, []interface{}{index, value})
 	_ = c(ctx, cmd)
 	return cmd
 }
 
 func (c cmdable) LTrim(ctx context.Context, key string, start, stop int64) *StatusCmd {
-	cmd := NewStatusCmd(
+	cmd := NewStatusCmd2(
 		ctx,
 		"ltrim",
 		key,
-		start,
-		stop,
+		[]interface{}{start, stop},
 	)
 	_ = c(ctx, cmd)
 	return cmd
 }
 
 func (c cmdable) RPop(ctx context.Context, key string) *StringCmd {
-	cmd := NewStringCmd(ctx, "rpop", key)
+	cmd := NewStringCmd2(ctx, "rpop", key, nil)
 	_ = c(ctx, cmd)
 	return cmd
 }
 
 func (c cmdable) RPopCount(ctx context.Context, key string, count int) *StringSliceCmd {
-	cmd := NewStringSliceCmd(ctx, "rpop", key, count)
+	cmd := NewStringSliceCmd2(ctx, "rpop", key, []interface{}{count})
 	_ = c(ctx, cmd)
 	return cmd
 }
 
 func (c cmdable) RPopLPush(ctx context.Context, source, destination string) *StringCmd {
-	cmd := NewStringCmd(ctx, "rpoplpush", source, destination)
+	cmd := NewStringCmd3(ctx, "rpoplpush", source, destination, nil)
 	_ = c(ctx, cmd)
 	return cmd
 }
 
 func (c cmdable) RPush(ctx context.Context, key string, values ...interface{}) *IntCmd {
-	args := make([]interface{}, 2, 2+len(values))
-	args[0] = "rpush"
-	args[1] = key
-	args = appendArgs(args, values)
-	cmd := NewIntCmd(ctx, args...)
+	cmd := NewIntCmd2Any(ctx, "rpush", key, values)
 	_ = c(ctx, cmd)
 	return cmd
 }
 
 func (c cmdable) RPushX(ctx context.Context, key string, values ...interface{}) *IntCmd {
-	args := make([]interface{}, 2, 2+len(values))
-	args[0] = "rpushx"
-	args[1] = key
-	args = appendArgs(args, values)
-	cmd := NewIntCmd(ctx, args...)
+	cmd := NewIntCmd2Any(ctx, "rpushx", key, values)
 	_ = c(ctx, cmd)
 	return cmd
 }
 
 func (c cmdable) LMove(ctx context.Context, source, destination, srcpos, destpos string) *StringCmd {
-	cmd := NewStringCmd(ctx, "lmove", source, destination, srcpos, destpos)
+	cmd := NewStringCmd3S(ctx, "lmove", source, destination, []string{srcpos, destpos})
 	_ = c(ctx, cmd)
 	return cmd
 }
 
-func (c cmdable) BLMove(
-	ctx context.Context, source, destination, srcpos, destpos string, timeout time.Duration,
-) *StringCmd {
-	cmd := NewStringCmd(ctx, "blmove", source, destination, srcpos, destpos, formatSec(ctx, timeout))
+func (c cmdable) BLMove(ctx context.Context, source, destination, srcpos, destpos string, timeout time.Duration) *StringCmd {
+	cmd := NewStringCmd3(ctx, "blmove", source, destination, []interface{}{srcpos, destpos, formatSec(ctx, timeout)})
 	cmd.setReadTimeout(timeout)
 	_ = c(ctx, cmd)
 	return cmd
