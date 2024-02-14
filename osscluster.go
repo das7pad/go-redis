@@ -308,7 +308,7 @@ func (opt *ClusterOptions) clientOptions() *Options {
 	}
 }
 
-//------------------------------------------------------------------------------
+// ------------------------------------------------------------------------------
 
 type clusterNode struct {
 	Client *Client
@@ -404,7 +404,7 @@ func (n *clusterNode) SetGeneration(gen uint32) {
 	}
 }
 
-//------------------------------------------------------------------------------
+// ------------------------------------------------------------------------------
 
 type clusterNodes struct {
 	opt *ClusterOptions
@@ -581,7 +581,7 @@ func (c *clusterNodes) Random() (*clusterNode, error) {
 	return c.GetOrCreate(addrs[n])
 }
 
-//------------------------------------------------------------------------------
+// ------------------------------------------------------------------------------
 
 type clusterSlot struct {
 	start, end int
@@ -783,7 +783,7 @@ func (c *clusterState) slotNodes(slot int) []*clusterNode {
 	return nil
 }
 
-//------------------------------------------------------------------------------
+// ------------------------------------------------------------------------------
 
 type clusterStateHolder struct {
 	load func(ctx context.Context) (*clusterState, error)
@@ -843,7 +843,7 @@ func (c *clusterStateHolder) ReloadOrGet(ctx context.Context) (*clusterState, er
 	return c.Get(ctx)
 }
 
-//------------------------------------------------------------------------------
+// ------------------------------------------------------------------------------
 
 // ClusterClient is a Redis Cluster client representing a pool of zero
 // or more underlying connections. It's safe for concurrent use by
@@ -902,7 +902,7 @@ func (c *ClusterClient) Close() error {
 
 // Do create a Cmd from the args and processes the cmd.
 func (c *ClusterClient) Do(ctx context.Context, args ...interface{}) *Cmd {
-	cmd := NewCmd(ctx, args...)
+	cmd := NewCmd2(ctx, "", "", args)
 	_ = c.Process(ctx, cmd)
 	return cmd
 }
@@ -937,7 +937,7 @@ func (c *ClusterClient) process(ctx context.Context, cmd Cmder) error {
 			ask = false
 
 			pipe := node.Client.Pipeline()
-			_ = pipe.Process(ctx, NewCmd(ctx, "asking"))
+			_ = pipe.Process(ctx, NewCmd2(ctx, "asking", "", nil))
 			_ = pipe.Process(ctx, cmd)
 			_, lastErr = pipe.Exec(ctx)
 		} else {
@@ -1394,7 +1394,7 @@ func (c *ClusterClient) checkMovedErr(
 	}
 
 	if ask {
-		failedCmds.Add(node, NewCmd(ctx, "asking"), cmd)
+		failedCmds.Add(node, NewCmd2(ctx, "asking", "", nil), cmd)
 		return true
 	}
 
@@ -1589,7 +1589,7 @@ func (c *ClusterClient) cmdsMoved(
 
 	if ask {
 		for _, cmd := range cmds {
-			failedCmds.Add(node, NewCmd(ctx, "asking"), cmd)
+			failedCmds.Add(node, NewCmd2(ctx, "asking", "", nil), cmd)
 		}
 		return nil
 	}
@@ -1899,7 +1899,7 @@ loop:
 	return ss
 }
 
-//------------------------------------------------------------------------------
+// ------------------------------------------------------------------------------
 
 type cmdsMap struct {
 	mu sync.Mutex

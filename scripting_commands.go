@@ -44,15 +44,7 @@ func (c cmdable) EvalShaRO(ctx context.Context, sha1 string, keys []string, args
 }
 
 func (c cmdable) eval(ctx context.Context, name, payload string, keys []string, args ...interface{}) *Cmd {
-	cmdArgs := make([]interface{}, 3+len(keys), 3+len(keys)+len(args))
-	cmdArgs[0] = name
-	cmdArgs[1] = payload
-	cmdArgs[2] = len(keys)
-	for i, key := range keys {
-		cmdArgs[3+i] = key
-	}
-	cmdArgs = appendArgs(cmdArgs, args)
-	cmd := NewCmd(ctx, cmdArgs...)
+	cmd := NewCmd2(ctx, name, payload, fcallArgs(keys, args))
 
 	// it is possible that only args exist without a key.
 	// rdb.eval(ctx, eval, script, nil, arg1, arg2)
@@ -64,31 +56,25 @@ func (c cmdable) eval(ctx context.Context, name, payload string, keys []string, 
 }
 
 func (c cmdable) ScriptExists(ctx context.Context, hashes ...string) *BoolSliceCmd {
-	args := make([]interface{}, 2+len(hashes))
-	args[0] = "script"
-	args[1] = "exists"
-	for i, hash := range hashes {
-		args[2+i] = hash
-	}
-	cmd := NewBoolSliceCmd(ctx, args...)
+	cmd := NewBoolSliceCmd2S(ctx, "script", "exists", hashes)
 	_ = c(ctx, cmd)
 	return cmd
 }
 
 func (c cmdable) ScriptFlush(ctx context.Context) *StatusCmd {
-	cmd := NewStatusCmd(ctx, "script", "flush")
+	cmd := NewStatusCmd2(ctx, "script", "flush", nil)
 	_ = c(ctx, cmd)
 	return cmd
 }
 
 func (c cmdable) ScriptKill(ctx context.Context) *StatusCmd {
-	cmd := NewStatusCmd(ctx, "script", "kill")
+	cmd := NewStatusCmd2(ctx, "script", "kill", nil)
 	_ = c(ctx, cmd)
 	return cmd
 }
 
 func (c cmdable) ScriptLoad(ctx context.Context, script string) *StringCmd {
-	cmd := NewStringCmd(ctx, "script", "load", script)
+	cmd := NewStringCmd3(ctx, "script", "load", script, nil)
 	_ = c(ctx, cmd)
 	return cmd
 }
@@ -107,77 +93,74 @@ type FunctionListQuery struct {
 }
 
 func (c cmdable) FunctionLoad(ctx context.Context, code string) *StringCmd {
-	cmd := NewStringCmd(ctx, "function", "load", code)
+	cmd := NewStringCmd3(ctx, "function", "load", code, nil)
 	_ = c(ctx, cmd)
 	return cmd
 }
 
 func (c cmdable) FunctionLoadReplace(ctx context.Context, code string) *StringCmd {
-	cmd := NewStringCmd(ctx, "function", "load", "replace", code)
+	cmd := NewStringCmd3S(ctx, "function", "load", "replace", []string{code})
 	_ = c(ctx, cmd)
 	return cmd
 }
 
 func (c cmdable) FunctionDelete(ctx context.Context, libName string) *StringCmd {
-	cmd := NewStringCmd(ctx, "function", "delete", libName)
+	cmd := NewStringCmd3(ctx, "function", "delete", libName, nil)
 	_ = c(ctx, cmd)
 	return cmd
 }
 
 func (c cmdable) FunctionFlush(ctx context.Context) *StringCmd {
-	cmd := NewStringCmd(ctx, "function", "flush")
+	cmd := NewStringCmd2(ctx, "function", "flush", nil)
 	_ = c(ctx, cmd)
 	return cmd
 }
 
 func (c cmdable) FunctionKill(ctx context.Context) *StringCmd {
-	cmd := NewStringCmd(ctx, "function", "kill")
+	cmd := NewStringCmd2(ctx, "function", "kill", nil)
 	_ = c(ctx, cmd)
 	return cmd
 }
 
 func (c cmdable) FunctionFlushAsync(ctx context.Context) *StringCmd {
-	cmd := NewStringCmd(ctx, "function", "flush", "async")
+	cmd := NewStringCmd3(ctx, "function", "flush", "async", nil)
 	_ = c(ctx, cmd)
 	return cmd
 }
 
 func (c cmdable) FunctionList(ctx context.Context, q FunctionListQuery) *FunctionListCmd {
-	args := make([]interface{}, 2, 5)
-	args[0] = "function"
-	args[1] = "list"
+	argsS := make([]string, 0, 3)
 	if q.LibraryNamePattern != "" {
-		args = append(args, "libraryname", q.LibraryNamePattern)
+		argsS = append(argsS, "libraryname", q.LibraryNamePattern)
 	}
 	if q.WithCode {
-		args = append(args, "withcode")
+		argsS = append(argsS, "withcode")
 	}
-	cmd := NewFunctionListCmd(ctx, args...)
+	cmd := NewFunctionListCmd2S(ctx, "function", "list", argsS)
 	_ = c(ctx, cmd)
 	return cmd
 }
 
 func (c cmdable) FunctionDump(ctx context.Context) *StringCmd {
-	cmd := NewStringCmd(ctx, "function", "dump")
+	cmd := NewStringCmd2(ctx, "function", "dump", nil)
 	_ = c(ctx, cmd)
 	return cmd
 }
 
 func (c cmdable) FunctionRestore(ctx context.Context, libDump string) *StringCmd {
-	cmd := NewStringCmd(ctx, "function", "restore", libDump)
+	cmd := NewStringCmd3(ctx, "function", "restore", libDump, nil)
 	_ = c(ctx, cmd)
 	return cmd
 }
 
 func (c cmdable) FunctionStats(ctx context.Context) *FunctionStatsCmd {
-	cmd := NewFunctionStatsCmd(ctx, "function", "stats")
+	cmd := NewFunctionStatsCmd2(ctx, "function", "stats", nil)
 	_ = c(ctx, cmd)
 	return cmd
 }
 
 func (c cmdable) FCall(ctx context.Context, function string, keys []string, args ...interface{}) *Cmd {
-	cmdArgs := fcallArgs("fcall", function, keys, args...)
-	cmd := NewCmd(ctx, cmdArgs...)
+	cmd := NewCmd2(ctx, "fcall", function, fcallArgs(keys, args))
 	if len(keys) > 0 {
 		cmd.SetFirstKeyPos(3)
 	}
@@ -192,8 +175,7 @@ func (c cmdable) FCallRo(ctx context.Context, function string, keys []string, ar
 }
 
 func (c cmdable) FCallRO(ctx context.Context, function string, keys []string, args ...interface{}) *Cmd {
-	cmdArgs := fcallArgs("fcall_ro", function, keys, args...)
-	cmd := NewCmd(ctx, cmdArgs...)
+	cmd := NewCmd2(ctx, "fcall_ro", function, fcallArgs(keys, args))
 	if len(keys) > 0 {
 		cmd.SetFirstKeyPos(3)
 	}
@@ -201,15 +183,12 @@ func (c cmdable) FCallRO(ctx context.Context, function string, keys []string, ar
 	return cmd
 }
 
-func fcallArgs(command string, function string, keys []string, args ...interface{}) []interface{} {
-	cmdArgs := make([]interface{}, 3+len(keys), 3+len(keys)+len(args))
-	cmdArgs[0] = command
-	cmdArgs[1] = function
-	cmdArgs[2] = len(keys)
+func fcallArgs(keys []string, args []interface{}) []interface{} {
+	cmdArgs := make([]interface{}, 1+len(keys), 1+len(keys)+len(args))
+	cmdArgs[0] = len(keys)
 	for i, key := range keys {
-		cmdArgs[3+i] = key
+		cmdArgs[1+i] = key
 	}
-
 	cmdArgs = append(cmdArgs, args...)
 	return cmdArgs
 }

@@ -14,7 +14,7 @@ import (
 	"github.com/redis/go-redis/v9/internal/rand"
 )
 
-//------------------------------------------------------------------------------
+// ------------------------------------------------------------------------------
 
 // FailoverOptions are used to configure a failover client and should
 // be passed to NewFailoverClient.
@@ -283,7 +283,7 @@ func masterReplicaDialer(
 	}
 }
 
-//------------------------------------------------------------------------------
+// ------------------------------------------------------------------------------
 
 // SentinelClient is a client for a Redis Sentinel.
 type SentinelClient struct {
@@ -330,7 +330,7 @@ func (c *SentinelClient) pubSub() *PubSub {
 // Ping is used to test if a connection is still alive, or to
 // measure latency.
 func (c *SentinelClient) Ping(ctx context.Context) *StringCmd {
-	cmd := NewStringCmd(ctx, "ping")
+	cmd := NewStringCmd2(ctx, "ping", "", nil)
 	_ = c.Process(ctx, cmd)
 	return cmd
 }
@@ -356,13 +356,13 @@ func (c *SentinelClient) PSubscribe(ctx context.Context, channels ...string) *Pu
 }
 
 func (c *SentinelClient) GetMasterAddrByName(ctx context.Context, name string) *StringSliceCmd {
-	cmd := NewStringSliceCmd(ctx, "sentinel", "get-master-addr-by-name", name)
+	cmd := NewStringSliceCmd3(ctx, "sentinel", "get-master-addr-by-name", name, nil)
 	_ = c.Process(ctx, cmd)
 	return cmd
 }
 
 func (c *SentinelClient) Sentinels(ctx context.Context, name string) *MapStringStringSliceCmd {
-	cmd := NewMapStringStringSliceCmd(ctx, "sentinel", "sentinels", name)
+	cmd := NewMapStringStringSliceCmd3(ctx, "sentinel", "sentinels", name, nil)
 	_ = c.Process(ctx, cmd)
 	return cmd
 }
@@ -370,7 +370,7 @@ func (c *SentinelClient) Sentinels(ctx context.Context, name string) *MapStringS
 // Failover forces a failover as if the master was not reachable, and without
 // asking for agreement to other Sentinels.
 func (c *SentinelClient) Failover(ctx context.Context, name string) *StatusCmd {
-	cmd := NewStatusCmd(ctx, "sentinel", "failover", name)
+	cmd := NewStatusCmd3(ctx, "sentinel", "failover", name, nil)
 	_ = c.Process(ctx, cmd)
 	return cmd
 }
@@ -380,7 +380,7 @@ func (c *SentinelClient) Failover(ctx context.Context, name string) *StatusCmd {
 // (including a failover in progress), and removes every replica and sentinel
 // already discovered and associated with the master.
 func (c *SentinelClient) Reset(ctx context.Context, pattern string) *IntCmd {
-	cmd := NewIntCmd(ctx, "sentinel", "reset", pattern)
+	cmd := NewIntCmd3(ctx, "sentinel", "reset", pattern, nil)
 	_ = c.Process(ctx, cmd)
 	return cmd
 }
@@ -388,28 +388,28 @@ func (c *SentinelClient) Reset(ctx context.Context, pattern string) *IntCmd {
 // FlushConfig forces Sentinel to rewrite its configuration on disk, including
 // the current Sentinel state.
 func (c *SentinelClient) FlushConfig(ctx context.Context) *StatusCmd {
-	cmd := NewStatusCmd(ctx, "sentinel", "flushconfig")
+	cmd := NewStatusCmd2(ctx, "sentinel", "flushconfig", nil)
 	_ = c.Process(ctx, cmd)
 	return cmd
 }
 
 // Master shows the state and info of the specified master.
 func (c *SentinelClient) Master(ctx context.Context, name string) *MapStringStringCmd {
-	cmd := NewMapStringStringCmd(ctx, "sentinel", "master", name)
+	cmd := NewMapStringStringCmd3(ctx, "sentinel", "master", name, nil)
 	_ = c.Process(ctx, cmd)
 	return cmd
 }
 
 // Masters shows a list of monitored masters and their state.
 func (c *SentinelClient) Masters(ctx context.Context) *SliceCmd {
-	cmd := NewSliceCmd(ctx, "sentinel", "masters")
+	cmd := NewSliceCmd2(ctx, "sentinel", "masters", nil)
 	_ = c.Process(ctx, cmd)
 	return cmd
 }
 
 // Replicas shows a list of replicas for the specified master and their state.
 func (c *SentinelClient) Replicas(ctx context.Context, name string) *MapStringStringSliceCmd {
-	cmd := NewMapStringStringSliceCmd(ctx, "sentinel", "replicas", name)
+	cmd := NewMapStringStringSliceCmd3(ctx, "sentinel", "replicas", name, nil)
 	_ = c.Process(ctx, cmd)
 	return cmd
 }
@@ -419,7 +419,7 @@ func (c *SentinelClient) Replicas(ctx context.Context, name string) *MapStringSt
 // failover. This command should be used in monitoring systems to check if a
 // Sentinel deployment is ok.
 func (c *SentinelClient) CkQuorum(ctx context.Context, name string) *StringCmd {
-	cmd := NewStringCmd(ctx, "sentinel", "ckquorum", name)
+	cmd := NewStringCmd3(ctx, "sentinel", "ckquorum", name, nil)
 	_ = c.Process(ctx, cmd)
 	return cmd
 }
@@ -427,14 +427,14 @@ func (c *SentinelClient) CkQuorum(ctx context.Context, name string) *StringCmd {
 // Monitor tells the Sentinel to start monitoring a new master with the specified
 // name, ip, port, and quorum.
 func (c *SentinelClient) Monitor(ctx context.Context, name, ip, port, quorum string) *StringCmd {
-	cmd := NewStringCmd(ctx, "sentinel", "monitor", name, ip, port, quorum)
+	cmd := NewStringCmd3S(ctx, "sentinel", "monitor", name, []string{ip, port, quorum})
 	_ = c.Process(ctx, cmd)
 	return cmd
 }
 
 // Set is used in order to change configuration parameters of a specific master.
 func (c *SentinelClient) Set(ctx context.Context, name, option, value string) *StringCmd {
-	cmd := NewStringCmd(ctx, "sentinel", "set", name, option, value)
+	cmd := NewStringCmd3S(ctx, "sentinel", "set", name, []string{option, value})
 	_ = c.Process(ctx, cmd)
 	return cmd
 }
@@ -443,12 +443,12 @@ func (c *SentinelClient) Set(ctx context.Context, name, option, value string) *S
 // longer be monitored, and will totally be removed from the internal state of
 // the Sentinel.
 func (c *SentinelClient) Remove(ctx context.Context, name string) *StringCmd {
-	cmd := NewStringCmd(ctx, "sentinel", "remove", name)
+	cmd := NewStringCmd3(ctx, "sentinel", "remove", name, nil)
 	_ = c.Process(ctx, cmd)
 	return cmd
 }
 
-//------------------------------------------------------------------------------
+// ------------------------------------------------------------------------------
 
 type sentinelFailover struct {
 	opt *FailoverOptions
@@ -781,7 +781,7 @@ func contains(slice []string, str string) bool {
 	return false
 }
 
-//------------------------------------------------------------------------------
+// ------------------------------------------------------------------------------
 
 // NewFailoverClusterClient returns a client that supports routing read-only commands
 // to a replica node.
