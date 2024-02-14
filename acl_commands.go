@@ -9,27 +9,23 @@ type ACLCmdable interface {
 }
 
 func (c cmdable) ACLDryRun(ctx context.Context, username string, command ...interface{}) *StringCmd {
-	args := make([]interface{}, 0, 3+len(command))
-	args = append(args, "acl", "dryrun", username)
-	args = append(args, command...)
-	cmd := NewStringCmd(ctx, args...)
+	cmd := NewStringCmd3(ctx, "acl", "dryrun", username, command)
 	_ = c(ctx, cmd)
 	return cmd
 }
 
 func (c cmdable) ACLLog(ctx context.Context, count int64) *ACLLogCmd {
-	args := make([]interface{}, 0, 3)
-	args = append(args, "acl", "log")
+	var args []interface{}
 	if count > 0 {
 		args = append(args, count)
 	}
-	cmd := NewACLLogCmd(ctx, args...)
+	cmd := NewACLLogCmd2(ctx, "acl", "log", args)
 	_ = c(ctx, cmd)
 	return cmd
 }
 
 func (c cmdable) ACLLogReset(ctx context.Context) *StatusCmd {
-	cmd := NewStatusCmd(ctx, "acl", "log", "reset")
+	cmd := NewStatusCmd3(ctx, "acl", "log", "reset", nil)
 	_ = c(ctx, cmd)
 	return cmd
 }

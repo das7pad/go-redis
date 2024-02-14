@@ -45,6 +45,10 @@ type Cmder interface {
 	Err() error
 }
 
+type extendedArgsCmder interface {
+	FullArgs() (int, string, string, string, []interface{}, []string)
+}
+
 func setCmdsErr(cmds []Cmder, e error) {
 	for _, cmd := range cmds {
 		if cmd.Err() == nil {
@@ -72,6 +76,9 @@ func writeCmds(wr *proto.Writer, cmds []Cmder) error {
 }
 
 func writeCmd(wr *proto.Writer, cmd Cmder) error {
+	if s, ok := cmd.(extendedArgsCmder); ok {
+		return wr.WriteFullArgs(s.FullArgs())
+	}
 	return wr.WriteArgs(cmd.Args())
 }
 
@@ -101,11 +108,45 @@ func cmdFirstKeyPos(cmd Cmder) int {
 func cmdString(cmd Cmder, val interface{}) string {
 	b := make([]byte, 0, 64)
 
-	for i, arg := range cmd.Args() {
-		if i > 0 {
-			b = append(b, ' ')
+	if e, ok := cmd.(extendedArgsCmder); ok {
+		_, c, first, second, args, argsS := e.FullArgs()
+		if c != "" {
+			if len(b) > 0 {
+				b = append(b, ' ')
+			}
+			b = append(b, c...)
 		}
-		b = internal.AppendArg(b, arg)
+		if first != "" {
+			if len(b) > 0 {
+				b = append(b, ' ')
+			}
+			b = append(b, first...)
+		}
+		if second != "" {
+			if len(b) > 0 {
+				b = append(b, ' ')
+			}
+			b = append(b, second...)
+		}
+		for _, arg := range args {
+			if len(b) > 0 {
+				b = append(b, ' ')
+			}
+			b = internal.AppendArg(b, arg)
+		}
+		for _, s := range argsS {
+			if len(b) > 0 {
+				b = append(b, ' ')
+			}
+			b = append(b, s...)
+		}
+	} else {
+		for i, arg := range cmd.Args() {
+			if i > 0 {
+				b = append(b, ' ')
+			}
+			b = internal.AppendArg(b, arg)
+		}
 	}
 
 	if err := cmd.Err(); err != nil {
@@ -119,13 +160,17 @@ func cmdString(cmd Cmder, val interface{}) string {
 	return util.BytesToString(b)
 }
 
-//------------------------------------------------------------------------------
+// ------------------------------------------------------------------------------
 
 type baseCmd struct {
-	ctx    context.Context
-	args   []interface{}
-	err    error
-	keyPos int8
+	ctx       context.Context
+	cmd       string
+	firstArg  string
+	secondArg string
+	args      []interface{}
+	argsS     []string
+	err       error
+	keyPos    int8
 
 	_readTimeout *time.Duration
 }
@@ -133,9 +178,6 @@ type baseCmd struct {
 var _ Cmder = (*Cmd)(nil)
 
 func (cmd *baseCmd) Name() string {
-	if len(cmd.args) == 0 {
-		return ""
-	}
 	// Cmd name must be lower cased.
 	return internal.ToLower(cmd.stringArg(0))
 }
@@ -143,23 +185,73 @@ func (cmd *baseCmd) Name() string {
 func (cmd *baseCmd) FullName() string {
 	switch name := cmd.Name(); name {
 	case "cluster", "command":
-		if len(cmd.args) == 1 {
+		if cmd.NArgs() == 1 {
 			return name
 		}
-		if s2, ok := cmd.args[1].(string); ok {
-			return name + " " + s2
-		}
-		return name
+		return name + " " + cmd.stringArg(1)
 	default:
 		return name
 	}
 }
 
+func (cmd *baseCmd) NArgs() int {
+	i := 0
+	if cmd.cmd != "" {
+		i++
+	}
+	if cmd.firstArg != "" {
+		i++
+	}
+	if cmd.secondArg != "" {
+		i++
+	}
+	return i + len(cmd.args) + len(cmd.argsS)
+}
+
 func (cmd *baseCmd) Args() []interface{} {
-	return cmd.args
+	args := make([]interface{}, 0, cmd.NArgs())
+	if cmd.cmd != "" {
+		args = append(args, cmd.cmd)
+	}
+	if cmd.firstArg != "" {
+		args = append(args, cmd.firstArg)
+	}
+	if cmd.secondArg != "" {
+		args = append(args, cmd.secondArg)
+	}
+	args = append(args, cmd.args...)
+	for _, s := range cmd.argsS {
+		args = append(args, s)
+	}
+	return args
+}
+
+func (cmd *baseCmd) FullArgs() (int, string, string, string, []interface{}, []string) {
+	return cmd.NArgs(), cmd.cmd, cmd.firstArg, cmd.secondArg, cmd.args, cmd.argsS
 }
 
 func (cmd *baseCmd) stringArg(pos int) string {
+	if cmd.cmd != "" {
+		if pos == 0 {
+			return cmd.cmd
+		}
+		pos--
+	}
+	if cmd.firstArg != "" {
+		if pos == 0 {
+			return cmd.firstArg
+		}
+		pos--
+	}
+	if cmd.secondArg != "" {
+		if pos == 0 {
+			return cmd.secondArg
+		}
+		pos--
+	}
+	if pos >= 0 && pos < len(cmd.argsS) {
+		return cmd.argsS[pos]
+	}
 	if pos < 0 || pos >= len(cmd.args) {
 		return ""
 	}
@@ -197,7 +289,7 @@ func (cmd *baseCmd) setReadTimeout(d time.Duration) {
 	cmd._readTimeout = &d
 }
 
-//------------------------------------------------------------------------------
+// ------------------------------------------------------------------------------
 
 type Cmd struct {
 	baseCmd
@@ -205,11 +297,45 @@ type Cmd struct {
 	val interface{}
 }
 
+func getCmdAndFirstArg(args []interface{}) (string, string, []interface{}) {
+	var cmd, firstArg string
+	if len(args) >= 1 {
+		var ok bool
+		if cmd, ok = args[0].(string); ok {
+			args = args[1:]
+		}
+		if len(args) >= 1 {
+			if firstArg, ok = args[0].(string); ok {
+				args = args[1:]
+			}
+		}
+	}
+	return cmd, firstArg, args
+}
+
 func NewCmd(ctx context.Context, args ...interface{}) *Cmd {
+	cmd, firstArg, args := getCmdAndFirstArg(args)
+	return NewCmd2(ctx, cmd, firstArg, args)
+}
+
+func NewCmd2(ctx context.Context, cmd, firstArg string, args []interface{}) *Cmd {
 	return &Cmd{
 		baseCmd: baseCmd{
-			ctx:  ctx,
-			args: args,
+			ctx:      ctx,
+			cmd:      cmd,
+			firstArg: firstArg,
+			args:     args,
+		},
+	}
+}
+
+func NewCmd2S(ctx context.Context, cmd, firstArg string, argsS []string) *Cmd {
+	return &Cmd{
+		baseCmd: baseCmd{
+			ctx:      ctx,
+			cmd:      cmd,
+			firstArg: firstArg,
+			argsS:    argsS,
 		},
 	}
 }
@@ -482,7 +608,7 @@ func (cmd *Cmd) readReply(rd *proto.Reader) (err error) {
 	return err
 }
 
-//------------------------------------------------------------------------------
+// ------------------------------------------------------------------------------
 
 type SliceCmd struct {
 	baseCmd
@@ -497,6 +623,40 @@ func NewSliceCmd(ctx context.Context, args ...interface{}) *SliceCmd {
 		baseCmd: baseCmd{
 			ctx:  ctx,
 			args: args,
+		},
+	}
+}
+
+func NewSliceCmd2(ctx context.Context, cmd, firstArg string, args []interface{}) *SliceCmd {
+	return &SliceCmd{
+		baseCmd: baseCmd{
+			ctx:      ctx,
+			cmd:      cmd,
+			firstArg: firstArg,
+			args:     args,
+		},
+	}
+}
+
+func NewSliceCmd2S(ctx context.Context, cmd, firstArg string, argsS []string) *SliceCmd {
+	return &SliceCmd{
+		baseCmd: baseCmd{
+			ctx:      ctx,
+			cmd:      cmd,
+			firstArg: firstArg,
+			argsS:    argsS,
+		},
+	}
+}
+
+func NewSliceCmd3(ctx context.Context, cmd, firstArg, secondArg string, args []interface{}) *SliceCmd {
+	return &SliceCmd{
+		baseCmd: baseCmd{
+			ctx:       ctx,
+			cmd:       cmd,
+			firstArg:  firstArg,
+			secondArg: secondArg,
+			args:      args,
 		},
 	}
 }
@@ -527,11 +687,11 @@ func (cmd *SliceCmd) Scan(dst interface{}) error {
 	// Pass the list of keys and values.
 	// Skip the first two args for: HMGET key
 	var args []interface{}
-	if cmd.args[0] == "hmget" {
-		args = cmd.args[2:]
+	if cmd.stringArg(0) == "hmget" {
+		args = cmd.Args()[2:]
 	} else {
 		// Otherwise, it's: MGET field field ...
-		args = cmd.args[1:]
+		args = cmd.Args()[1:]
 	}
 
 	return hscan.Scan(dst, args, cmd.val)
@@ -542,7 +702,7 @@ func (cmd *SliceCmd) readReply(rd *proto.Reader) (err error) {
 	return err
 }
 
-//------------------------------------------------------------------------------
+// ------------------------------------------------------------------------------
 
 type StatusCmd struct {
 	baseCmd
@@ -557,6 +717,65 @@ func NewStatusCmd(ctx context.Context, args ...interface{}) *StatusCmd {
 		baseCmd: baseCmd{
 			ctx:  ctx,
 			args: args,
+		},
+	}
+}
+
+func NewStatusCmd2(ctx context.Context, cmd, firstArg string, args []interface{}) *StatusCmd {
+	return &StatusCmd{
+		baseCmd: baseCmd{
+			ctx:      ctx,
+			cmd:      cmd,
+			firstArg: firstArg,
+			args:     args,
+		},
+	}
+}
+
+func NewStatusCmd2Any(ctx context.Context, cmd, firstArg string, args []interface{}) *StatusCmd {
+	args, argsS := appendArgs(nil, args)
+	return &StatusCmd{
+		baseCmd: baseCmd{
+			ctx:      ctx,
+			cmd:      cmd,
+			firstArg: firstArg,
+			args:     args,
+			argsS:    argsS,
+		},
+	}
+}
+
+func NewStatusCmd2S(ctx context.Context, cmd, firstArg string, argsS []string) *StatusCmd {
+	return &StatusCmd{
+		baseCmd: baseCmd{
+			ctx:      ctx,
+			cmd:      cmd,
+			firstArg: firstArg,
+			argsS:    argsS,
+		},
+	}
+}
+
+func NewStatusCmd3(ctx context.Context, cmd, firstArg, secondArg string, args []interface{}) *StatusCmd {
+	return &StatusCmd{
+		baseCmd: baseCmd{
+			ctx:       ctx,
+			cmd:       cmd,
+			firstArg:  firstArg,
+			secondArg: secondArg,
+			args:      args,
+		},
+	}
+}
+
+func NewStatusCmd3S(ctx context.Context, cmd, firstArg, secondArg string, argsS []string) *StatusCmd {
+	return &StatusCmd{
+		baseCmd: baseCmd{
+			ctx:       ctx,
+			cmd:       cmd,
+			firstArg:  firstArg,
+			secondArg: secondArg,
+			argsS:     argsS,
 		},
 	}
 }
@@ -586,7 +805,7 @@ func (cmd *StatusCmd) readReply(rd *proto.Reader) (err error) {
 	return err
 }
 
-//------------------------------------------------------------------------------
+// ------------------------------------------------------------------------------
 
 type IntCmd struct {
 	baseCmd
@@ -601,6 +820,65 @@ func NewIntCmd(ctx context.Context, args ...interface{}) *IntCmd {
 		baseCmd: baseCmd{
 			ctx:  ctx,
 			args: args,
+		},
+	}
+}
+
+func NewIntCmd2(ctx context.Context, cmd, firstArg string, args []interface{}) *IntCmd {
+	return &IntCmd{
+		baseCmd: baseCmd{
+			ctx:      ctx,
+			cmd:      cmd,
+			firstArg: firstArg,
+			args:     args,
+		},
+	}
+}
+
+func NewIntCmd2Any(ctx context.Context, cmd, firstArg string, args []interface{}) *IntCmd {
+	args, argsS := appendArgs(nil, args)
+	return &IntCmd{
+		baseCmd: baseCmd{
+			ctx:      ctx,
+			cmd:      cmd,
+			firstArg: firstArg,
+			args:     args,
+			argsS:    argsS,
+		},
+	}
+}
+
+func NewIntCmd2S(ctx context.Context, cmd, firstArg string, argsS []string) *IntCmd {
+	return &IntCmd{
+		baseCmd: baseCmd{
+			ctx:      ctx,
+			cmd:      cmd,
+			firstArg: firstArg,
+			argsS:    argsS,
+		},
+	}
+}
+
+func NewIntCmd3(ctx context.Context, cmd, firstArg, secondArg string, args []interface{}) *IntCmd {
+	return &IntCmd{
+		baseCmd: baseCmd{
+			ctx:       ctx,
+			cmd:       cmd,
+			firstArg:  firstArg,
+			secondArg: secondArg,
+			args:      args,
+		},
+	}
+}
+
+func NewIntCmd3S(ctx context.Context, cmd, firstArg, secondArg string, argsS []string) *IntCmd {
+	return &IntCmd{
+		baseCmd: baseCmd{
+			ctx:       ctx,
+			cmd:       cmd,
+			firstArg:  firstArg,
+			secondArg: secondArg,
+			argsS:     argsS,
 		},
 	}
 }
@@ -630,7 +908,7 @@ func (cmd *IntCmd) readReply(rd *proto.Reader) (err error) {
 	return err
 }
 
-//------------------------------------------------------------------------------
+// ------------------------------------------------------------------------------
 
 type IntSliceCmd struct {
 	baseCmd
@@ -645,6 +923,42 @@ func NewIntSliceCmd(ctx context.Context, args ...interface{}) *IntSliceCmd {
 		baseCmd: baseCmd{
 			ctx:  ctx,
 			args: args,
+		},
+	}
+}
+
+func NewIntSliceCmd2(ctx context.Context, cmd, firstArg string, args []interface{}) *IntSliceCmd {
+	return &IntSliceCmd{
+		baseCmd: baseCmd{
+			ctx:      ctx,
+			cmd:      cmd,
+			firstArg: firstArg,
+			args:     args,
+		},
+	}
+}
+
+func NewIntSliceCmd2Any(ctx context.Context, cmd, firstArg string, args []interface{}) *IntSliceCmd {
+	args, argsS := appendArgs(nil, args)
+	return &IntSliceCmd{
+		baseCmd: baseCmd{
+			ctx:      ctx,
+			cmd:      cmd,
+			firstArg: firstArg,
+			args:     args,
+			argsS:    argsS,
+		},
+	}
+}
+
+func NewIntSliceCmd3(ctx context.Context, cmd, firstArg, secondArg string, args []interface{}) *IntSliceCmd {
+	return &IntSliceCmd{
+		baseCmd: baseCmd{
+			ctx:       ctx,
+			cmd:       cmd,
+			firstArg:  firstArg,
+			secondArg: secondArg,
+			args:      args,
 		},
 	}
 }
@@ -679,7 +993,7 @@ func (cmd *IntSliceCmd) readReply(rd *proto.Reader) error {
 	return nil
 }
 
-//------------------------------------------------------------------------------
+// ------------------------------------------------------------------------------
 
 type DurationCmd struct {
 	baseCmd
@@ -695,6 +1009,31 @@ func NewDurationCmd(ctx context.Context, precision time.Duration, args ...interf
 		baseCmd: baseCmd{
 			ctx:  ctx,
 			args: args,
+		},
+		precision: precision,
+	}
+}
+
+func NewDurationCmd2(ctx context.Context, precision time.Duration, cmd, firstArg string, args []interface{}) *DurationCmd {
+	return &DurationCmd{
+		baseCmd: baseCmd{
+			ctx:      ctx,
+			cmd:      cmd,
+			firstArg: firstArg,
+			args:     args,
+		},
+		precision: precision,
+	}
+}
+
+func NewDurationCmd3(ctx context.Context, precision time.Duration, cmd, firstArg, secondArg string, args []interface{}) *DurationCmd {
+	return &DurationCmd{
+		baseCmd: baseCmd{
+			ctx:       ctx,
+			cmd:       cmd,
+			firstArg:  firstArg,
+			secondArg: secondArg,
+			args:      args,
 		},
 		precision: precision,
 	}
@@ -732,7 +1071,7 @@ func (cmd *DurationCmd) readReply(rd *proto.Reader) error {
 	return nil
 }
 
-//------------------------------------------------------------------------------
+// ------------------------------------------------------------------------------
 
 type TimeCmd struct {
 	baseCmd
@@ -747,6 +1086,17 @@ func NewTimeCmd(ctx context.Context, args ...interface{}) *TimeCmd {
 		baseCmd: baseCmd{
 			ctx:  ctx,
 			args: args,
+		},
+	}
+}
+
+func NewTimeCmd2(ctx context.Context, cmd, firstArg string, args []interface{}) *TimeCmd {
+	return &TimeCmd{
+		baseCmd: baseCmd{
+			ctx:      ctx,
+			cmd:      cmd,
+			firstArg: firstArg,
+			args:     args,
 		},
 	}
 }
@@ -783,7 +1133,7 @@ func (cmd *TimeCmd) readReply(rd *proto.Reader) error {
 	return nil
 }
 
-//------------------------------------------------------------------------------
+// ------------------------------------------------------------------------------
 
 type BoolCmd struct {
 	baseCmd
@@ -798,6 +1148,42 @@ func NewBoolCmd(ctx context.Context, args ...interface{}) *BoolCmd {
 		baseCmd: baseCmd{
 			ctx:  ctx,
 			args: args,
+		},
+	}
+}
+
+func NewBoolCmd2(ctx context.Context, cmd, firstArg string, args []interface{}) *BoolCmd {
+	return &BoolCmd{
+		baseCmd: baseCmd{
+			ctx:      ctx,
+			cmd:      cmd,
+			firstArg: firstArg,
+			args:     args,
+		},
+	}
+}
+
+func NewBoolCmd2Any(ctx context.Context, cmd, firstArg string, args []interface{}) *BoolCmd {
+	args, argsS := appendArgs(nil, args)
+	return &BoolCmd{
+		baseCmd: baseCmd{
+			ctx:      ctx,
+			cmd:      cmd,
+			firstArg: firstArg,
+			args:     args,
+			argsS:    argsS,
+		},
+	}
+}
+
+func NewBoolCmd3(ctx context.Context, cmd, firstArg, secondArg string, args []interface{}) *BoolCmd {
+	return &BoolCmd{
+		baseCmd: baseCmd{
+			ctx:       ctx,
+			cmd:       cmd,
+			firstArg:  firstArg,
+			secondArg: secondArg,
+			args:      args,
 		},
 	}
 }
@@ -830,7 +1216,7 @@ func (cmd *BoolCmd) readReply(rd *proto.Reader) (err error) {
 	return err
 }
 
-//------------------------------------------------------------------------------
+// ------------------------------------------------------------------------------
 
 type StringCmd struct {
 	baseCmd
@@ -845,6 +1231,64 @@ func NewStringCmd(ctx context.Context, args ...interface{}) *StringCmd {
 		baseCmd: baseCmd{
 			ctx:  ctx,
 			args: args,
+		},
+	}
+}
+
+func NewStringCmd2(ctx context.Context, cmd, firstArg string, args []interface{}) *StringCmd {
+	return &StringCmd{
+		baseCmd: baseCmd{
+			ctx:      ctx,
+			cmd:      cmd,
+			firstArg: firstArg,
+			args:     args,
+		},
+	}
+}
+
+func NewStringCmd2Both(ctx context.Context, cmd, firstArg string, args []interface{}, argsS []string) *StringCmd {
+	return &StringCmd{
+		baseCmd: baseCmd{
+			ctx:      ctx,
+			cmd:      cmd,
+			firstArg: firstArg,
+			args:     args,
+			argsS:    argsS,
+		},
+	}
+}
+
+func NewStringCmd2S(ctx context.Context, cmd, firstArg string, argsS []string) *StringCmd {
+	return &StringCmd{
+		baseCmd: baseCmd{
+			ctx:      ctx,
+			cmd:      cmd,
+			firstArg: firstArg,
+			argsS:    argsS,
+		},
+	}
+}
+
+func NewStringCmd3(ctx context.Context, cmd, firstArg, secondArg string, args []interface{}) *StringCmd {
+	return &StringCmd{
+		baseCmd: baseCmd{
+			ctx:       ctx,
+			cmd:       cmd,
+			firstArg:  firstArg,
+			secondArg: secondArg,
+			args:      args,
+		},
+	}
+}
+
+func NewStringCmd3S(ctx context.Context, cmd, firstArg, secondArg string, argsS []string) *StringCmd {
+	return &StringCmd{
+		baseCmd: baseCmd{
+			ctx:       ctx,
+			cmd:       cmd,
+			firstArg:  firstArg,
+			secondArg: secondArg,
+			argsS:     argsS,
 		},
 	}
 }
@@ -934,7 +1378,7 @@ func (cmd *StringCmd) readReply(rd *proto.Reader) (err error) {
 	return err
 }
 
-//------------------------------------------------------------------------------
+// ------------------------------------------------------------------------------
 
 type FloatCmd struct {
 	baseCmd
@@ -949,6 +1393,41 @@ func NewFloatCmd(ctx context.Context, args ...interface{}) *FloatCmd {
 		baseCmd: baseCmd{
 			ctx:  ctx,
 			args: args,
+		},
+	}
+}
+
+func NewFloatCmd2(ctx context.Context, cmd, firstArg string, args []interface{}) *FloatCmd {
+	return &FloatCmd{
+		baseCmd: baseCmd{
+			ctx:      ctx,
+			cmd:      cmd,
+			firstArg: firstArg,
+			args:     args,
+		},
+	}
+}
+
+func NewFloatCmd3(ctx context.Context, cmd, firstArg, secondArg string, args []interface{}) *FloatCmd {
+	return &FloatCmd{
+		baseCmd: baseCmd{
+			ctx:       ctx,
+			cmd:       cmd,
+			firstArg:  firstArg,
+			secondArg: secondArg,
+			args:      args,
+		},
+	}
+}
+
+func NewFloatCmd3S(ctx context.Context, cmd, firstArg, secondArg string, argsS []string) *FloatCmd {
+	return &FloatCmd{
+		baseCmd: baseCmd{
+			ctx:       ctx,
+			cmd:       cmd,
+			firstArg:  firstArg,
+			secondArg: secondArg,
+			argsS:     argsS,
 		},
 	}
 }
@@ -974,7 +1453,7 @@ func (cmd *FloatCmd) readReply(rd *proto.Reader) (err error) {
 	return err
 }
 
-//------------------------------------------------------------------------------
+// ------------------------------------------------------------------------------
 
 type FloatSliceCmd struct {
 	baseCmd
@@ -989,6 +1468,28 @@ func NewFloatSliceCmd(ctx context.Context, args ...interface{}) *FloatSliceCmd {
 		baseCmd: baseCmd{
 			ctx:  ctx,
 			args: args,
+		},
+	}
+}
+
+func NewFloatSliceCmd2(ctx context.Context, cmd, firstArg string, args []interface{}) *FloatSliceCmd {
+	return &FloatSliceCmd{
+		baseCmd: baseCmd{
+			ctx:      ctx,
+			cmd:      cmd,
+			firstArg: firstArg,
+			args:     args,
+		},
+	}
+}
+
+func NewFloatSliceCmd2S(ctx context.Context, cmd, firstArg string, argsS []string) *FloatSliceCmd {
+	return &FloatSliceCmd{
+		baseCmd: baseCmd{
+			ctx:      ctx,
+			cmd:      cmd,
+			firstArg: firstArg,
+			argsS:    argsS,
 		},
 	}
 }
@@ -1029,7 +1530,7 @@ func (cmd *FloatSliceCmd) readReply(rd *proto.Reader) error {
 	return nil
 }
 
-//------------------------------------------------------------------------------
+// ------------------------------------------------------------------------------
 
 type StringSliceCmd struct {
 	baseCmd
@@ -1044,6 +1545,53 @@ func NewStringSliceCmd(ctx context.Context, args ...interface{}) *StringSliceCmd
 		baseCmd: baseCmd{
 			ctx:  ctx,
 			args: args,
+		},
+	}
+}
+
+func NewStringSliceCmd2(ctx context.Context, cmd, firstArg string, args []interface{}) *StringSliceCmd {
+	return &StringSliceCmd{
+		baseCmd: baseCmd{
+			ctx:      ctx,
+			cmd:      cmd,
+			firstArg: firstArg,
+			args:     args,
+		},
+	}
+}
+
+func NewStringSliceCmd2Any(ctx context.Context, cmd, firstArg string, args []interface{}) *StringSliceCmd {
+	args, argsS := appendArgs(nil, args)
+	return &StringSliceCmd{
+		baseCmd: baseCmd{
+			ctx:      ctx,
+			cmd:      cmd,
+			firstArg: firstArg,
+			args:     args,
+			argsS:    argsS,
+		},
+	}
+}
+
+func NewStringSliceCmd2S(ctx context.Context, cmd, firstArg string, argsS []string) *StringSliceCmd {
+	return &StringSliceCmd{
+		baseCmd: baseCmd{
+			ctx:      ctx,
+			cmd:      cmd,
+			firstArg: firstArg,
+			argsS:    argsS,
+		},
+	}
+}
+
+func NewStringSliceCmd3(ctx context.Context, cmd, firstArg, secondArg string, args []interface{}) *StringSliceCmd {
+	return &StringSliceCmd{
+		baseCmd: baseCmd{
+			ctx:       ctx,
+			cmd:       cmd,
+			firstArg:  firstArg,
+			secondArg: secondArg,
+			args:      args,
 		},
 	}
 }
@@ -1087,7 +1635,7 @@ func (cmd *StringSliceCmd) readReply(rd *proto.Reader) error {
 	return nil
 }
 
-//------------------------------------------------------------------------------
+// ------------------------------------------------------------------------------
 
 type KeyValue struct {
 	Key   string
@@ -1107,6 +1655,17 @@ func NewKeyValueSliceCmd(ctx context.Context, args ...interface{}) *KeyValueSlic
 		baseCmd: baseCmd{
 			ctx:  ctx,
 			args: args,
+		},
+	}
+}
+
+func NewKeyValueSliceCmd2(ctx context.Context, cmd, firstArg string, args []interface{}) *KeyValueSliceCmd {
+	return &KeyValueSliceCmd{
+		baseCmd: baseCmd{
+			ctx:      ctx,
+			cmd:      cmd,
+			firstArg: firstArg,
+			args:     args,
 		},
 	}
 }
@@ -1181,7 +1740,7 @@ func (cmd *KeyValueSliceCmd) readReply(rd *proto.Reader) error { // nolint:dupl
 	return nil
 }
 
-//------------------------------------------------------------------------------
+// ------------------------------------------------------------------------------
 
 type BoolSliceCmd struct {
 	baseCmd
@@ -1196,6 +1755,41 @@ func NewBoolSliceCmd(ctx context.Context, args ...interface{}) *BoolSliceCmd {
 		baseCmd: baseCmd{
 			ctx:  ctx,
 			args: args,
+		},
+	}
+}
+
+func NewBoolSliceCmd2(ctx context.Context, cmd, firstArg string, args []interface{}) *BoolSliceCmd {
+	return &BoolSliceCmd{
+		baseCmd: baseCmd{
+			ctx:      ctx,
+			cmd:      cmd,
+			firstArg: firstArg,
+			args:     args,
+		},
+	}
+}
+
+func NewBoolSliceCmd2Any(ctx context.Context, cmd, firstArg string, args []interface{}) *BoolSliceCmd {
+	args, argsS := appendArgs(nil, args)
+	return &BoolSliceCmd{
+		baseCmd: baseCmd{
+			ctx:      ctx,
+			cmd:      cmd,
+			firstArg: firstArg,
+			args:     args,
+			argsS:    argsS,
+		},
+	}
+}
+
+func NewBoolSliceCmd2S(ctx context.Context, cmd, firstArg string, argsS []string) *BoolSliceCmd {
+	return &BoolSliceCmd{
+		baseCmd: baseCmd{
+			ctx:      ctx,
+			cmd:      cmd,
+			firstArg: firstArg,
+			argsS:    argsS,
 		},
 	}
 }
@@ -1230,7 +1824,7 @@ func (cmd *BoolSliceCmd) readReply(rd *proto.Reader) error {
 	return nil
 }
 
-//------------------------------------------------------------------------------
+// ------------------------------------------------------------------------------
 
 type MapStringStringCmd struct {
 	baseCmd
@@ -1245,6 +1839,29 @@ func NewMapStringStringCmd(ctx context.Context, args ...interface{}) *MapStringS
 		baseCmd: baseCmd{
 			ctx:  ctx,
 			args: args,
+		},
+	}
+}
+
+func NewMapStringStringCmd2(ctx context.Context, cmd, firstArg string, args []interface{}) *MapStringStringCmd {
+	return &MapStringStringCmd{
+		baseCmd: baseCmd{
+			ctx:      ctx,
+			cmd:      cmd,
+			firstArg: firstArg,
+			args:     args,
+		},
+	}
+}
+
+func NewMapStringStringCmd3(ctx context.Context, cmd, firstArg, secondArg string, args []interface{}) *MapStringStringCmd {
+	return &MapStringStringCmd{
+		baseCmd: baseCmd{
+			ctx:       ctx,
+			cmd:       cmd,
+			firstArg:  firstArg,
+			secondArg: secondArg,
+			args:      args,
 		},
 	}
 }
@@ -1309,7 +1926,7 @@ func (cmd *MapStringStringCmd) readReply(rd *proto.Reader) error {
 	return nil
 }
 
-//------------------------------------------------------------------------------
+// ------------------------------------------------------------------------------
 
 type MapStringIntCmd struct {
 	baseCmd
@@ -1324,6 +1941,28 @@ func NewMapStringIntCmd(ctx context.Context, args ...interface{}) *MapStringIntC
 		baseCmd: baseCmd{
 			ctx:  ctx,
 			args: args,
+		},
+	}
+}
+
+func NewMapStringIntCmd2S(ctx context.Context, cmd, firstArg string, argsS []string) *MapStringIntCmd {
+	return &MapStringIntCmd{
+		baseCmd: baseCmd{
+			ctx:      ctx,
+			cmd:      cmd,
+			firstArg: firstArg,
+			argsS:    argsS,
+		},
+	}
+}
+func NewMapStringIntCmd3(ctx context.Context, cmd, firstArg, secondArg string, args []interface{}) *MapStringIntCmd {
+	return &MapStringIntCmd{
+		baseCmd: baseCmd{
+			ctx:       ctx,
+			cmd:       cmd,
+			firstArg:  firstArg,
+			secondArg: secondArg,
+			args:      args,
 		},
 	}
 }
@@ -1381,6 +2020,28 @@ func NewMapStringSliceInterfaceCmd(ctx context.Context, args ...interface{}) *Ma
 	}
 }
 
+func NewMapStringSliceInterfaceCmd2(ctx context.Context, cmd, firstArg string, args []interface{}) *MapStringSliceInterfaceCmd {
+	return &MapStringSliceInterfaceCmd{
+		baseCmd: baseCmd{
+			ctx:      ctx,
+			cmd:      cmd,
+			firstArg: firstArg,
+			args:     args,
+		},
+	}
+}
+
+func NewMapStringSliceInterfaceCmd2S(ctx context.Context, cmd, firstArg string, argsS []string) *MapStringSliceInterfaceCmd {
+	return &MapStringSliceInterfaceCmd{
+		baseCmd: baseCmd{
+			ctx:      ctx,
+			cmd:      cmd,
+			firstArg: firstArg,
+			argsS:    argsS,
+		},
+	}
+}
+
 func (cmd *MapStringSliceInterfaceCmd) String() string {
 	return cmdString(cmd, cmd.val)
 }
@@ -1425,7 +2086,7 @@ func (cmd *MapStringSliceInterfaceCmd) readReply(rd *proto.Reader) (err error) {
 	return nil
 }
 
-//------------------------------------------------------------------------------
+// ------------------------------------------------------------------------------
 
 type StringStructMapCmd struct {
 	baseCmd
@@ -1440,6 +2101,17 @@ func NewStringStructMapCmd(ctx context.Context, args ...interface{}) *StringStru
 		baseCmd: baseCmd{
 			ctx:  ctx,
 			args: args,
+		},
+	}
+}
+
+func NewStringStructMapCmd2(ctx context.Context, cmd, firstArg string, args []interface{}) *StringStructMapCmd {
+	return &StringStructMapCmd{
+		baseCmd: baseCmd{
+			ctx:      ctx,
+			cmd:      cmd,
+			firstArg: firstArg,
+			args:     args,
 		},
 	}
 }
@@ -1477,7 +2149,7 @@ func (cmd *StringStructMapCmd) readReply(rd *proto.Reader) error {
 	return nil
 }
 
-//------------------------------------------------------------------------------
+// ------------------------------------------------------------------------------
 
 type XMessage struct {
 	ID     string
@@ -1497,6 +2169,30 @@ func NewXMessageSliceCmd(ctx context.Context, args ...interface{}) *XMessageSlic
 		baseCmd: baseCmd{
 			ctx:  ctx,
 			args: args,
+		},
+	}
+}
+
+func NewXMessageSliceCmd3(ctx context.Context, cmd, firstArg, secondArg string, args []interface{}) *XMessageSliceCmd {
+	return &XMessageSliceCmd{
+		baseCmd: baseCmd{
+			ctx:       ctx,
+			cmd:       cmd,
+			firstArg:  firstArg,
+			secondArg: secondArg,
+			args:      args,
+		},
+	}
+}
+
+func NewXMessageSliceCmd3S(ctx context.Context, cmd, firstArg, secondArg string, argsS []string) *XMessageSliceCmd {
+	return &XMessageSliceCmd{
+		baseCmd: baseCmd{
+			ctx:       ctx,
+			cmd:       cmd,
+			firstArg:  firstArg,
+			secondArg: secondArg,
+			argsS:     argsS,
 		},
 	}
 }
@@ -1583,7 +2279,7 @@ func stringInterfaceMapParser(rd *proto.Reader) (map[string]interface{}, error) 
 	return m, nil
 }
 
-//------------------------------------------------------------------------------
+// ------------------------------------------------------------------------------
 
 type XStream struct {
 	Stream   string
@@ -1603,6 +2299,29 @@ func NewXStreamSliceCmd(ctx context.Context, args ...interface{}) *XStreamSliceC
 		baseCmd: baseCmd{
 			ctx:  ctx,
 			args: args,
+		},
+	}
+}
+
+func NewXStreamSliceCmd2(ctx context.Context, cmd, firstArg string, args []interface{}) *XStreamSliceCmd {
+	return &XStreamSliceCmd{
+		baseCmd: baseCmd{
+			ctx:      ctx,
+			cmd:      cmd,
+			firstArg: firstArg,
+			args:     args,
+		},
+	}
+}
+
+func NewXStreamSliceCmd3(ctx context.Context, cmd, firstArg, secondArg string, args []interface{}) *XStreamSliceCmd {
+	return &XStreamSliceCmd{
+		baseCmd: baseCmd{
+			ctx:       ctx,
+			cmd:       cmd,
+			firstArg:  firstArg,
+			secondArg: secondArg,
+			args:      args,
 		},
 	}
 }
@@ -1655,7 +2374,7 @@ func (cmd *XStreamSliceCmd) readReply(rd *proto.Reader) error {
 	return nil
 }
 
-//------------------------------------------------------------------------------
+// ------------------------------------------------------------------------------
 
 type XPending struct {
 	Count     int64
@@ -1676,6 +2395,18 @@ func NewXPendingCmd(ctx context.Context, args ...interface{}) *XPendingCmd {
 		baseCmd: baseCmd{
 			ctx:  ctx,
 			args: args,
+		},
+	}
+}
+
+func NewXPendingCmd3(ctx context.Context, cmd, firstArg, secondArg string, args []interface{}) *XPendingCmd {
+	return &XPendingCmd{
+		baseCmd: baseCmd{
+			ctx:       ctx,
+			cmd:       cmd,
+			firstArg:  firstArg,
+			secondArg: secondArg,
+			args:      args,
 		},
 	}
 }
@@ -1738,7 +2469,7 @@ func (cmd *XPendingCmd) readReply(rd *proto.Reader) error {
 	return nil
 }
 
-//------------------------------------------------------------------------------
+// ------------------------------------------------------------------------------
 
 type XPendingExt struct {
 	ID         string
@@ -1759,6 +2490,18 @@ func NewXPendingExtCmd(ctx context.Context, args ...interface{}) *XPendingExtCmd
 		baseCmd: baseCmd{
 			ctx:  ctx,
 			args: args,
+		},
+	}
+}
+
+func NewXPendingExtCmd3(ctx context.Context, cmd, firstArg, secondArg string, args []interface{}) *XPendingExtCmd {
+	return &XPendingExtCmd{
+		baseCmd: baseCmd{
+			ctx:       ctx,
+			cmd:       cmd,
+			firstArg:  firstArg,
+			secondArg: secondArg,
+			args:      args,
 		},
 	}
 }
@@ -1813,7 +2556,7 @@ func (cmd *XPendingExtCmd) readReply(rd *proto.Reader) error {
 	return nil
 }
 
-//------------------------------------------------------------------------------
+// ------------------------------------------------------------------------------
 
 type XAutoClaimCmd struct {
 	baseCmd
@@ -1829,6 +2572,18 @@ func NewXAutoClaimCmd(ctx context.Context, args ...interface{}) *XAutoClaimCmd {
 		baseCmd: baseCmd{
 			ctx:  ctx,
 			args: args,
+		},
+	}
+}
+
+func NewXAutoClaimCmd3(ctx context.Context, cmd, firstArg, secondArg string, args []interface{}) *XAutoClaimCmd {
+	return &XAutoClaimCmd{
+		baseCmd: baseCmd{
+			ctx:       ctx,
+			cmd:       cmd,
+			firstArg:  firstArg,
+			secondArg: secondArg,
+			args:      args,
 		},
 	}
 }
@@ -1883,7 +2638,7 @@ func (cmd *XAutoClaimCmd) readReply(rd *proto.Reader) error {
 	return nil
 }
 
-//------------------------------------------------------------------------------
+// ------------------------------------------------------------------------------
 
 type XAutoClaimJustIDCmd struct {
 	baseCmd
@@ -1899,6 +2654,18 @@ func NewXAutoClaimJustIDCmd(ctx context.Context, args ...interface{}) *XAutoClai
 		baseCmd: baseCmd{
 			ctx:  ctx,
 			args: args,
+		},
+	}
+}
+
+func NewXAutoClaimJustIDCmd3(ctx context.Context, cmd, firstArg, secondArg string, args []interface{}) *XAutoClaimJustIDCmd {
+	return &XAutoClaimJustIDCmd{
+		baseCmd: baseCmd{
+			ctx:       ctx,
+			cmd:       cmd,
+			firstArg:  firstArg,
+			secondArg: secondArg,
+			args:      args,
 		},
 	}
 }
@@ -1961,7 +2728,7 @@ func (cmd *XAutoClaimJustIDCmd) readReply(rd *proto.Reader) error {
 	return nil
 }
 
-//------------------------------------------------------------------------------
+// ------------------------------------------------------------------------------
 
 type XInfoConsumersCmd struct {
 	baseCmd
@@ -1980,8 +2747,11 @@ var _ Cmder = (*XInfoConsumersCmd)(nil)
 func NewXInfoConsumersCmd(ctx context.Context, stream string, group string) *XInfoConsumersCmd {
 	return &XInfoConsumersCmd{
 		baseCmd: baseCmd{
-			ctx:  ctx,
-			args: []interface{}{"xinfo", "consumers", stream, group},
+			ctx:       ctx,
+			cmd:       "xinfo",
+			firstArg:  "consumers",
+			secondArg: stream,
+			argsS:     []string{group},
 		},
 	}
 }
@@ -2047,7 +2817,7 @@ func (cmd *XInfoConsumersCmd) readReply(rd *proto.Reader) error {
 	return nil
 }
 
-//------------------------------------------------------------------------------
+// ------------------------------------------------------------------------------
 
 type XInfoGroupsCmd struct {
 	baseCmd
@@ -2068,8 +2838,10 @@ var _ Cmder = (*XInfoGroupsCmd)(nil)
 func NewXInfoGroupsCmd(ctx context.Context, stream string) *XInfoGroupsCmd {
 	return &XInfoGroupsCmd{
 		baseCmd: baseCmd{
-			ctx:  ctx,
-			args: []interface{}{"xinfo", "groups", stream},
+			ctx:       ctx,
+			cmd:       "xinfo",
+			firstArg:  "groups",
+			secondArg: stream,
 		},
 	}
 }
@@ -2155,7 +2927,7 @@ func (cmd *XInfoGroupsCmd) readReply(rd *proto.Reader) error {
 	return nil
 }
 
-//------------------------------------------------------------------------------
+// ------------------------------------------------------------------------------
 
 type XInfoStreamCmd struct {
 	baseCmd
@@ -2180,8 +2952,10 @@ var _ Cmder = (*XInfoStreamCmd)(nil)
 func NewXInfoStreamCmd(ctx context.Context, stream string) *XInfoStreamCmd {
 	return &XInfoStreamCmd{
 		baseCmd: baseCmd{
-			ctx:  ctx,
-			args: []interface{}{"xinfo", "stream", stream},
+			ctx:       ctx,
+			cmd:       "xinfo",
+			firstArg:  "stream",
+			secondArg: stream,
 		},
 	}
 }
@@ -2272,7 +3046,7 @@ func (cmd *XInfoStreamCmd) readReply(rd *proto.Reader) error {
 	return nil
 }
 
-//------------------------------------------------------------------------------
+// ------------------------------------------------------------------------------
 
 type XInfoStreamFullCmd struct {
 	baseCmd
@@ -2329,6 +3103,18 @@ func NewXInfoStreamFullCmd(ctx context.Context, args ...interface{}) *XInfoStrea
 		baseCmd: baseCmd{
 			ctx:  ctx,
 			args: args,
+		},
+	}
+}
+
+func NewXInfoStreamFullCmd3(ctx context.Context, cmd, firstArg, secondArg string, args []interface{}) *XInfoStreamFullCmd {
+	return &XInfoStreamFullCmd{
+		baseCmd: baseCmd{
+			ctx:       ctx,
+			cmd:       cmd,
+			firstArg:  firstArg,
+			secondArg: secondArg,
+			args:      args,
 		},
 	}
 }
@@ -2613,7 +3399,7 @@ func readXInfoStreamConsumers(rd *proto.Reader) ([]XInfoStreamConsumer, error) {
 	return consumers, nil
 }
 
-//------------------------------------------------------------------------------
+// ------------------------------------------------------------------------------
 
 type ZSliceCmd struct {
 	baseCmd
@@ -2628,6 +3414,17 @@ func NewZSliceCmd(ctx context.Context, args ...interface{}) *ZSliceCmd {
 		baseCmd: baseCmd{
 			ctx:  ctx,
 			args: args,
+		},
+	}
+}
+
+func NewZSliceCmd2(ctx context.Context, cmd, firstArg string, args []interface{}) *ZSliceCmd {
+	return &ZSliceCmd{
+		baseCmd: baseCmd{
+			ctx:      ctx,
+			cmd:      cmd,
+			firstArg: firstArg,
+			args:     args,
 		},
 	}
 }
@@ -2691,7 +3488,7 @@ func (cmd *ZSliceCmd) readReply(rd *proto.Reader) error { // nolint:dupl
 	return nil
 }
 
-//------------------------------------------------------------------------------
+// ------------------------------------------------------------------------------
 
 type ZWithKeyCmd struct {
 	baseCmd
@@ -2706,6 +3503,17 @@ func NewZWithKeyCmd(ctx context.Context, args ...interface{}) *ZWithKeyCmd {
 		baseCmd: baseCmd{
 			ctx:  ctx,
 			args: args,
+		},
+	}
+}
+
+func NewZWithKeyCmd2(ctx context.Context, cmd, firstArg string, args []interface{}) *ZWithKeyCmd {
+	return &ZWithKeyCmd{
+		baseCmd: baseCmd{
+			ctx:      ctx,
+			cmd:      cmd,
+			firstArg: firstArg,
+			args:     args,
 		},
 	}
 }
@@ -2745,7 +3553,7 @@ func (cmd *ZWithKeyCmd) readReply(rd *proto.Reader) (err error) {
 	return nil
 }
 
-//------------------------------------------------------------------------------
+// ------------------------------------------------------------------------------
 
 type ScanCmd struct {
 	baseCmd
@@ -2763,6 +3571,18 @@ func NewScanCmd(ctx context.Context, process cmdable, args ...interface{}) *Scan
 		baseCmd: baseCmd{
 			ctx:  ctx,
 			args: args,
+		},
+		process: process,
+	}
+}
+
+func NewScanCmd2(ctx context.Context, process cmdable, cmd, firstArg string, args []interface{}) *ScanCmd {
+	return &ScanCmd{
+		baseCmd: baseCmd{
+			ctx:      ctx,
+			cmd:      cmd,
+			firstArg: firstArg,
+			args:     args,
 		},
 		process: process,
 	}
@@ -2817,7 +3637,7 @@ func (cmd *ScanCmd) Iterator() *ScanIterator {
 	}
 }
 
-//------------------------------------------------------------------------------
+// ------------------------------------------------------------------------------
 
 type ClusterNode struct {
 	ID                 string
@@ -2844,6 +3664,17 @@ func NewClusterSlotsCmd(ctx context.Context, args ...interface{}) *ClusterSlotsC
 		baseCmd: baseCmd{
 			ctx:  ctx,
 			args: args,
+		},
+	}
+}
+
+func NewClusterSlotsCmd2(ctx context.Context, cmd, firstArg string, args []interface{}) *ClusterSlotsCmd {
+	return &ClusterSlotsCmd{
+		baseCmd: baseCmd{
+			ctx:      ctx,
+			cmd:      cmd,
+			firstArg: firstArg,
+			args:     args,
 		},
 	}
 }
@@ -2956,7 +3787,7 @@ func (cmd *ClusterSlotsCmd) readReply(rd *proto.Reader) error {
 	return nil
 }
 
-//------------------------------------------------------------------------------
+// ------------------------------------------------------------------------------
 
 // GeoLocation is used with GeoAdd to add geospatial location.
 type GeoLocation struct {
@@ -2996,13 +3827,38 @@ func NewGeoLocationCmd(ctx context.Context, q *GeoRadiusQuery, args ...interface
 	return &GeoLocationCmd{
 		baseCmd: baseCmd{
 			ctx:  ctx,
-			args: geoLocationArgs(q, args...),
+			args: geoLocationArgs(q, args),
 		},
 		q: q,
 	}
 }
 
-func geoLocationArgs(q *GeoRadiusQuery, args ...interface{}) []interface{} {
+func NewGeoLocationCmd2(ctx context.Context, q *GeoRadiusQuery, cmd, firstArg string, args []interface{}) *GeoLocationCmd {
+	return &GeoLocationCmd{
+		baseCmd: baseCmd{
+			ctx:      ctx,
+			cmd:      cmd,
+			firstArg: firstArg,
+			args:     geoLocationArgs(q, args),
+		},
+		q: q,
+	}
+}
+
+func NewGeoLocationCmd3(ctx context.Context, q *GeoRadiusQuery, cmd, firstArg, secondArg string, args []interface{}) *GeoLocationCmd {
+	return &GeoLocationCmd{
+		baseCmd: baseCmd{
+			ctx:       ctx,
+			cmd:       cmd,
+			firstArg:  firstArg,
+			secondArg: secondArg,
+			args:      geoLocationArgs(q, args),
+		},
+		q: q,
+	}
+}
+
+func geoLocationArgs(q *GeoRadiusQuery, args []interface{}) []interface{} {
 	args = append(args, q.Radius)
 	if q.Unit != "" {
 		args = append(args, q.Unit)
@@ -3104,7 +3960,7 @@ func (cmd *GeoLocationCmd) readReply(rd *proto.Reader) error {
 	return nil
 }
 
-//------------------------------------------------------------------------------
+// ------------------------------------------------------------------------------
 
 // GeoSearchQuery is used for GEOSearch/GEOSearchStore command query.
 type GeoSearchQuery struct {
@@ -3206,13 +4062,23 @@ type GeoSearchLocationCmd struct {
 
 var _ Cmder = (*GeoSearchLocationCmd)(nil)
 
-func NewGeoSearchLocationCmd(
-	ctx context.Context, opt *GeoSearchLocationQuery, args ...interface{},
-) *GeoSearchLocationCmd {
+func NewGeoSearchLocationCmd(ctx context.Context, opt *GeoSearchLocationQuery, args ...interface{}) *GeoSearchLocationCmd {
 	return &GeoSearchLocationCmd{
 		baseCmd: baseCmd{
 			ctx:  ctx,
 			args: args,
+		},
+		opt: opt,
+	}
+}
+
+func NewGeoSearchLocationCmd2(ctx context.Context, opt *GeoSearchLocationQuery, cmd, firstArg string, args []interface{}) *GeoSearchLocationCmd {
+	return &GeoSearchLocationCmd{
+		baseCmd: baseCmd{
+			ctx:      ctx,
+			cmd:      cmd,
+			firstArg: firstArg,
+			args:     args,
 		},
 		opt: opt,
 	}
@@ -3285,7 +4151,7 @@ func (cmd *GeoSearchLocationCmd) readReply(rd *proto.Reader) error {
 	return nil
 }
 
-//------------------------------------------------------------------------------
+// ------------------------------------------------------------------------------
 
 type GeoPos struct {
 	Longitude, Latitude float64
@@ -3304,6 +4170,17 @@ func NewGeoPosCmd(ctx context.Context, args ...interface{}) *GeoPosCmd {
 		baseCmd: baseCmd{
 			ctx:  ctx,
 			args: args,
+		},
+	}
+}
+
+func NewGeoPosCmd2S(ctx context.Context, cmd, firstArg string, argsS []string) *GeoPosCmd {
+	return &GeoPosCmd{
+		baseCmd: baseCmd{
+			ctx:      ctx,
+			cmd:      cmd,
+			firstArg: firstArg,
+			argsS:    argsS,
 		},
 	}
 }
@@ -3359,7 +4236,7 @@ func (cmd *GeoPosCmd) readReply(rd *proto.Reader) error {
 	return nil
 }
 
-//------------------------------------------------------------------------------
+// ------------------------------------------------------------------------------
 
 type CommandInfo struct {
 	Name        string
@@ -3385,6 +4262,17 @@ func NewCommandsInfoCmd(ctx context.Context, args ...interface{}) *CommandsInfoC
 		baseCmd: baseCmd{
 			ctx:  ctx,
 			args: args,
+		},
+	}
+}
+
+func NewCommandsInfoCmd2(ctx context.Context, cmd, firstArg string, args []interface{}) *CommandsInfoCmd {
+	return &CommandsInfoCmd{
+		baseCmd: baseCmd{
+			ctx:      ctx,
+			cmd:      cmd,
+			firstArg: firstArg,
+			args:     args,
 		},
 	}
 }
@@ -3513,7 +4401,7 @@ func (cmd *CommandsInfoCmd) readReply(rd *proto.Reader) error {
 	return nil
 }
 
-//------------------------------------------------------------------------------
+// ------------------------------------------------------------------------------
 
 type cmdsInfoCache struct {
 	fn func(ctx context.Context) (map[string]*CommandInfo, error)
@@ -3549,7 +4437,7 @@ func (c *cmdsInfoCache) Get(ctx context.Context) (map[string]*CommandInfo, error
 	return c.cmds, err
 }
 
-//------------------------------------------------------------------------------
+// ------------------------------------------------------------------------------
 
 type SlowLog struct {
 	ID       int64
@@ -3575,6 +4463,17 @@ func NewSlowLogCmd(ctx context.Context, args ...interface{}) *SlowLogCmd {
 		baseCmd: baseCmd{
 			ctx:  ctx,
 			args: args,
+		},
+	}
+}
+
+func NewSlowLogCmd2(ctx context.Context, cmd, firstArg string, args []interface{}) *SlowLogCmd {
+	return &SlowLogCmd{
+		baseCmd: baseCmd{
+			ctx:      ctx,
+			cmd:      cmd,
+			firstArg: firstArg,
+			args:     args,
 		},
 	}
 }
@@ -3659,7 +4558,7 @@ func (cmd *SlowLogCmd) readReply(rd *proto.Reader) error {
 	return nil
 }
 
-//-----------------------------------------------------------------------
+// -----------------------------------------------------------------------
 
 type MapStringInterfaceCmd struct {
 	baseCmd
@@ -3674,6 +4573,29 @@ func NewMapStringInterfaceCmd(ctx context.Context, args ...interface{}) *MapStri
 		baseCmd: baseCmd{
 			ctx:  ctx,
 			args: args,
+		},
+	}
+}
+
+func NewMapStringInterfaceCmd2(ctx context.Context, cmd, firstArg string, args []interface{}) *MapStringInterfaceCmd {
+	return &MapStringInterfaceCmd{
+		baseCmd: baseCmd{
+			ctx:      ctx,
+			cmd:      cmd,
+			firstArg: firstArg,
+			args:     args,
+		},
+	}
+}
+
+func NewMapStringInterfaceCmd3S(ctx context.Context, cmd, firstArg, secondArg string, argsS []string) *MapStringInterfaceCmd {
+	return &MapStringInterfaceCmd{
+		baseCmd: baseCmd{
+			ctx:       ctx,
+			cmd:       cmd,
+			firstArg:  firstArg,
+			secondArg: secondArg,
+			argsS:     argsS,
 		},
 	}
 }
@@ -3723,7 +4645,7 @@ func (cmd *MapStringInterfaceCmd) readReply(rd *proto.Reader) error {
 	return nil
 }
 
-//-----------------------------------------------------------------------
+// -----------------------------------------------------------------------
 
 type MapStringStringSliceCmd struct {
 	baseCmd
@@ -3738,6 +4660,18 @@ func NewMapStringStringSliceCmd(ctx context.Context, args ...interface{}) *MapSt
 		baseCmd: baseCmd{
 			ctx:  ctx,
 			args: args,
+		},
+	}
+}
+
+func NewMapStringStringSliceCmd3(ctx context.Context, cmd, firstArg, secondArg string, args []interface{}) *MapStringStringSliceCmd {
+	return &MapStringStringSliceCmd{
+		baseCmd: baseCmd{
+			ctx:       ctx,
+			cmd:       cmd,
+			firstArg:  firstArg,
+			secondArg: secondArg,
+			args:      args,
 		},
 	}
 }
@@ -3787,7 +4721,7 @@ func (cmd *MapStringStringSliceCmd) readReply(rd *proto.Reader) error {
 	return nil
 }
 
-//-----------------------------------------------------------------------
+// -----------------------------------------------------------------------
 
 type MapStringInterfaceSliceCmd struct {
 	baseCmd
@@ -3802,6 +4736,17 @@ func NewMapStringInterfaceSliceCmd(ctx context.Context, args ...interface{}) *Ma
 		baseCmd: baseCmd{
 			ctx:  ctx,
 			args: args,
+		},
+	}
+}
+
+func NewMapStringInterfaceSliceCmd2(ctx context.Context, cmd, firstArg string, args []interface{}) *MapStringInterfaceSliceCmd {
+	return &MapStringInterfaceSliceCmd{
+		baseCmd: baseCmd{
+			ctx:      ctx,
+			cmd:      cmd,
+			firstArg: firstArg,
+			args:     args,
 		},
 	}
 }
@@ -3852,7 +4797,7 @@ func (cmd *MapStringInterfaceSliceCmd) readReply(rd *proto.Reader) error {
 	return nil
 }
 
-//------------------------------------------------------------------------------
+// ------------------------------------------------------------------------------
 
 type KeyValuesCmd struct {
 	baseCmd
@@ -3868,6 +4813,17 @@ func NewKeyValuesCmd(ctx context.Context, args ...interface{}) *KeyValuesCmd {
 		baseCmd: baseCmd{
 			ctx:  ctx,
 			args: args,
+		},
+	}
+}
+
+func NewKeyValuesCmd2(ctx context.Context, cmd, firstArg string, args []interface{}) *KeyValuesCmd {
+	return &KeyValuesCmd{
+		baseCmd: baseCmd{
+			ctx:      ctx,
+			cmd:      cmd,
+			firstArg: firstArg,
+			args:     args,
 		},
 	}
 }
@@ -3914,7 +4870,7 @@ func (cmd *KeyValuesCmd) readReply(rd *proto.Reader) (err error) {
 	return nil
 }
 
-//------------------------------------------------------------------------------
+// ------------------------------------------------------------------------------
 
 type ZSliceWithKeyCmd struct {
 	baseCmd
@@ -3930,6 +4886,17 @@ func NewZSliceWithKeyCmd(ctx context.Context, args ...interface{}) *ZSliceWithKe
 		baseCmd: baseCmd{
 			ctx:  ctx,
 			args: args,
+		},
+	}
+}
+
+func NewZSliceWithKeyCmd2(ctx context.Context, cmd, firstArg string, args []interface{}) *ZSliceWithKeyCmd {
+	return &ZSliceWithKeyCmd{
+		baseCmd: baseCmd{
+			ctx:      ctx,
+			cmd:      cmd,
+			firstArg: firstArg,
+			args:     args,
 		},
 	}
 }
@@ -4023,6 +4990,17 @@ func NewFunctionListCmd(ctx context.Context, args ...interface{}) *FunctionListC
 		baseCmd: baseCmd{
 			ctx:  ctx,
 			args: args,
+		},
+	}
+}
+
+func NewFunctionListCmd2S(ctx context.Context, cmd, firstArg string, argsS []string) *FunctionListCmd {
+	return &FunctionListCmd{
+		baseCmd: baseCmd{
+			ctx:      ctx,
+			cmd:      cmd,
+			firstArg: firstArg,
+			argsS:    argsS,
 		},
 	}
 }
@@ -4208,6 +5186,17 @@ func NewFunctionStatsCmd(ctx context.Context, args ...interface{}) *FunctionStat
 	}
 }
 
+func NewFunctionStatsCmd2(ctx context.Context, cmd, firstArg string, args []interface{}) *FunctionStatsCmd {
+	return &FunctionStatsCmd{
+		baseCmd: baseCmd{
+			ctx:      ctx,
+			cmd:      cmd,
+			firstArg: firstArg,
+			args:     args,
+		},
+	}
+}
+
 func (cmd *FunctionStatsCmd) SetVal(val FunctionStats) {
 	cmd.val = val
 }
@@ -4374,7 +5363,7 @@ func (cmd *FunctionStatsCmd) readRunningScripts(rd *proto.Reader) ([]RunningScri
 	return runningScripts, len(runningScripts) > 0, nil
 }
 
-//------------------------------------------------------------------------------
+// ------------------------------------------------------------------------------
 
 // LCSQuery is a parameter used for the LCS command
 type LCSQuery struct {
@@ -4417,10 +5406,7 @@ type LCSCmd struct {
 }
 
 func NewLCSCmd(ctx context.Context, q *LCSQuery) *LCSCmd {
-	args := make([]interface{}, 3, 7)
-	args[0] = "lcs"
-	args[1] = q.Key1
-	args[2] = q.Key2
+	args := make([]interface{}, 0, 4)
 
 	cmd := &LCSCmd{readType: 1}
 	if q.Len {
@@ -4437,8 +5423,11 @@ func NewLCSCmd(ctx context.Context, q *LCSQuery) *LCSCmd {
 		}
 	}
 	cmd.baseCmd = baseCmd{
-		ctx:  ctx,
-		args: args,
+		ctx:       ctx,
+		cmd:       "lcs",
+		firstArg:  q.Key1,
+		secondArg: q.Key2,
+		args:      args,
 	}
 
 	return cmd
@@ -4574,6 +5563,17 @@ func NewKeyFlagsCmd(ctx context.Context, args ...interface{}) *KeyFlagsCmd {
 	}
 }
 
+func NewKeyFlagsCmd2(ctx context.Context, cmd, firstArg string, args []interface{}) *KeyFlagsCmd {
+	return &KeyFlagsCmd{
+		baseCmd: baseCmd{
+			ctx:      ctx,
+			cmd:      cmd,
+			firstArg: firstArg,
+			args:     args,
+		},
+	}
+}
+
 func (cmd *KeyFlagsCmd) SetVal(val []KeyFlags) {
 	cmd.val = val
 }
@@ -4652,6 +5652,17 @@ func NewClusterLinksCmd(ctx context.Context, args ...interface{}) *ClusterLinksC
 		baseCmd: baseCmd{
 			ctx:  ctx,
 			args: args,
+		},
+	}
+}
+
+func NewClusterLinksCmd2(ctx context.Context, cmd, firstArg string, args []interface{}) *ClusterLinksCmd {
+	return &ClusterLinksCmd{
+		baseCmd: baseCmd{
+			ctx:      ctx,
+			cmd:      cmd,
+			firstArg: firstArg,
+			args:     args,
 		},
 	}
 }
@@ -4754,6 +5765,17 @@ func NewClusterShardsCmd(ctx context.Context, args ...interface{}) *ClusterShard
 		baseCmd: baseCmd{
 			ctx:  ctx,
 			args: args,
+		},
+	}
+}
+
+func NewClusterShardsCmd2(ctx context.Context, cmd, firstArg string, args []interface{}) *ClusterShardsCmd {
+	return &ClusterShardsCmd{
+		baseCmd: baseCmd{
+			ctx:      ctx,
+			cmd:      cmd,
+			firstArg: firstArg,
+			args:     args,
 		},
 	}
 }
@@ -4887,6 +5909,18 @@ func NewRankWithScoreCmd(ctx context.Context, args ...interface{}) *RankWithScor
 		baseCmd: baseCmd{
 			ctx:  ctx,
 			args: args,
+		},
+	}
+}
+
+func NewRankWithScoreCmd3S(ctx context.Context, cmd, firstArg, secondArg string, argsS []string) *RankWithScoreCmd {
+	return &RankWithScoreCmd{
+		baseCmd: baseCmd{
+			ctx:       ctx,
+			cmd:       cmd,
+			firstArg:  firstArg,
+			secondArg: secondArg,
+			argsS:     argsS,
 		},
 	}
 }
@@ -5034,6 +6068,17 @@ func NewClientInfoCmd(ctx context.Context, args ...interface{}) *ClientInfoCmd {
 		baseCmd: baseCmd{
 			ctx:  ctx,
 			args: args,
+		},
+	}
+}
+
+func NewClientInfoCmd2(ctx context.Context, cmd, firstArg string, args []interface{}) *ClientInfoCmd {
+	return &ClientInfoCmd{
+		baseCmd: baseCmd{
+			ctx:      ctx,
+			cmd:      cmd,
+			firstArg: firstArg,
+			args:     args,
 		},
 	}
 }
@@ -5234,6 +6279,17 @@ func NewACLLogCmd(ctx context.Context, args ...interface{}) *ACLLogCmd {
 	}
 }
 
+func NewACLLogCmd2(ctx context.Context, cmd, firstArg string, args []interface{}) *ACLLogCmd {
+	return &ACLLogCmd{
+		baseCmd: baseCmd{
+			ctx:      ctx,
+			cmd:      cmd,
+			firstArg: firstArg,
+			args:     args,
+		},
+	}
+}
+
 func (cmd *ACLLogCmd) SetVal(val []*ACLLogEntry) {
 	cmd.val = val
 }
@@ -5345,6 +6401,17 @@ func NewInfoCmd(ctx context.Context, args ...interface{}) *InfoCmd {
 	}
 }
 
+func NewInfoCmd2S(ctx context.Context, cmd, firstArg string, argsS []string) *InfoCmd {
+	return &InfoCmd{
+		baseCmd: baseCmd{
+			ctx:      ctx,
+			cmd:      cmd,
+			firstArg: firstArg,
+			argsS:    argsS,
+		},
+	}
+}
+
 func (cmd *InfoCmd) SetVal(val map[string]map[string]string) {
 	cmd.val = val
 }
@@ -5425,8 +6492,8 @@ type MonitorCmd struct {
 func newMonitorCmd(ctx context.Context, ch chan string) *MonitorCmd {
 	return &MonitorCmd{
 		baseCmd: baseCmd{
-			ctx:  ctx,
-			args: []interface{}{"monitor"},
+			ctx:      ctx,
+			firstArg: "monitor",
 		},
 		ch:     ch,
 		status: monitorStatusIdle,
