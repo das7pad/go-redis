@@ -507,11 +507,12 @@ func (p *ConnPool) isHealthyConn(cn *Conn) bool {
 	if p.cfg.ConnMaxLifetime > 0 && now.Sub(cn.createdAt) >= p.cfg.ConnMaxLifetime {
 		return false
 	}
-	if p.cfg.ConnMaxIdleTime > 0 && now.Sub(cn.UsedAt()) >= p.cfg.ConnMaxIdleTime {
+	lastUsed := cn.UsedAt()
+	if p.cfg.ConnMaxIdleTime > 0 && now.Sub(lastUsed) >= p.cfg.ConnMaxIdleTime {
 		return false
 	}
 
-	if cn.sysConn != nil {
+	if cn.sysConn != nil && now.Sub(lastUsed) > time.Second {
 		// reset previous timeout.
 		_ = cn.netConn.SetDeadline(zeroTime)
 		if connCheck(cn.sysConn) != nil {
