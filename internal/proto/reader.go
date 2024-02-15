@@ -2,6 +2,7 @@ package proto
 
 import (
 	"bufio"
+	"bytes"
 	"errors"
 	"fmt"
 	"io"
@@ -36,7 +37,7 @@ const (
 // Streamed           = "EOF:"
 // StreamedAggregated = '?'
 
-//------------------------------------------------------------------------------
+// ------------------------------------------------------------------------------
 
 const Nil = RedisError("redis: nil") // nolint:errname
 
@@ -50,7 +51,7 @@ func ParseErrorReply(line []byte) error {
 	return RedisError(line[1:])
 }
 
-//------------------------------------------------------------------------------
+// ------------------------------------------------------------------------------
 
 type Reader struct {
 	rd *bufio.Reader
@@ -366,6 +367,75 @@ func (r *Reader) ReadFloat() (float64, error) {
 		return strconv.ParseFloat(s, 64)
 	}
 	return 0, fmt.Errorf("redis: can't parse float reply: %.100q", line)
+}
+
+func (r *Reader) WriteString(buf *bytes.Buffer) error {
+	line, err2 := r.ReadLine()
+	if err2 != nil {
+		return err2
+	}
+
+	switch line[0] {
+	case RespStatus, RespInt, RespFloat:
+		buf.Write(line[1:])
+		return nil
+	case RespString:
+		n, err := replyLen(line)
+		if err != nil {
+			return err
+		}
+		buf.Grow(n)
+		if _, err = io.ReadFull(r.rd, buf.AvailableBuffer()[:n]); err != nil {
+			return err
+		}
+		buf.Write(buf.AvailableBuffer()[:n])
+		if _, err = r.rd.Discard(2); err != nil {
+			return err
+		}
+		return nil
+	case RespBool:
+		b, err := r.readBool(line)
+		if err != nil {
+			return err
+		}
+		p := strconv.AppendBool(buf.AvailableBuffer(), b)
+		buf.Write(p)
+		return nil
+	case RespVerbatim:
+		n, err := replyLen(line)
+		if err != nil {
+			return err
+		}
+		s, err := r.rd.Peek(4)
+		if err != nil {
+			return err
+		}
+		if len(s) < 4 || s[3] != ':' {
+			return fmt.Errorf("redis: can't parse verbatim string reply: %q", s)
+		}
+		if _, err = r.rd.Discard(4); err != nil {
+			return err
+		}
+		n -= 4
+		buf.Grow(n)
+		if _, err = io.ReadFull(r.rd, buf.AvailableBuffer()[:n]); err != nil {
+			return err
+		}
+		buf.Write(buf.AvailableBuffer()[:n])
+		if _, err = r.rd.Discard(2); err != nil {
+			return err
+		}
+		return nil
+	case RespBigInt:
+		b, err := r.readBigInt(line)
+		if err != nil {
+			return err
+		}
+		p := b.Append(buf.AvailableBuffer(), 10)
+		buf.Write(p)
+		return nil
+	}
+	return fmt.Errorf("redis: can't parse reply=%.100q reading string", line)
 }
 
 func (r *Reader) ReadString() (string, error) {
