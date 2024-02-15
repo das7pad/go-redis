@@ -291,6 +291,35 @@ func (cmd *baseCmd) setReadTimeout(d time.Duration) {
 
 // ------------------------------------------------------------------------------
 
+type customReadReplyCmd struct {
+	baseCmd
+	r func(rd *proto.Reader) error
+}
+
+func (cmd *customReadReplyCmd) readReply(rd *proto.Reader) error {
+	return cmd.r(rd)
+}
+
+func newNoCopyCmd(ctx context.Context, cmd, firstArg, secondArg string, args []interface{}, argsS []string, r func(rd *proto.Reader) error) *customReadReplyCmd {
+	return &customReadReplyCmd{
+		baseCmd: baseCmd{
+			ctx:       ctx,
+			cmd:       cmd,
+			firstArg:  firstArg,
+			secondArg: secondArg,
+			args:      args,
+			argsS:     argsS,
+		},
+		r: r,
+	}
+}
+
+func (cmd *customReadReplyCmd) String() string {
+	return cmdString(cmd, nil)
+}
+
+// ------------------------------------------------------------------------------
+
 type Cmd struct {
 	baseCmd
 
