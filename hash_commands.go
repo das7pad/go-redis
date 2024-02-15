@@ -1,8 +1,11 @@
 package redis
 
 import (
+	"bytes"
 	"context"
 	"time"
+
+	"github.com/redis/go-redis/v9/internal/proto"
 )
 
 type HashCmdable interface {
@@ -10,6 +13,7 @@ type HashCmdable interface {
 	HExists(ctx context.Context, key, field string) *BoolCmd
 	HGet(ctx context.Context, key, field string) *StringCmd
 	HGetAll(ctx context.Context, key string) *MapStringStringCmd
+	HGetAllIncremental(ctx context.Context, key string, next func(n, est int, k, v []byte)) error
 	HIncrBy(ctx context.Context, key, field string, incr int64) *IntCmd
 	HIncrByFloat(ctx context.Context, key, field string, incr float64) *FloatCmd
 	HKeys(ctx context.Context, key string) *StringSliceCmd
@@ -60,6 +64,30 @@ func (c cmdable) HGetAll(ctx context.Context, key string) *MapStringStringCmd {
 	cmd := NewMapStringStringCmd2(ctx, "hgetall", key, nil)
 	_ = c(ctx, cmd)
 	return cmd
+}
+
+func (c cmdable) HGetAllIncremental(ctx context.Context, key string, next func(n, est int, k, v []byte)) error {
+	cmd := newNoCopyCmd(ctx, "hgetall", key, "", nil, nil, func(rd *proto.Reader) error {
+		n, err := rd.ReadMapLen()
+		if err != nil {
+			return err
+		}
+		var a, b bytes.Buffer
+		for i := 0; i < n; i++ {
+			if err = rd.WriteString(&a); err != nil {
+				return err
+			}
+			if err = rd.WriteString(&b); err != nil {
+				return err
+			}
+			next(n-i, rd.Buffered(), a.Bytes(), b.Bytes())
+			a.Reset()
+			b.Reset()
+		}
+		return nil
+	})
+	_ = c(ctx, cmd)
+	return cmd.Err()
 }
 
 func (c cmdable) HIncrBy(ctx context.Context, key, field string, incr int64) *IntCmd {
