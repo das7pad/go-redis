@@ -505,12 +505,15 @@ func (p *ConnPool) isHealthyConn(cn *Conn) bool {
 	if p.cfg.ConnMaxLifetime > 0 && now.Sub(cn.createdAt) >= p.cfg.ConnMaxLifetime {
 		return false
 	}
-	if p.cfg.ConnMaxIdleTime > 0 && now.Sub(cn.UsedAt()) >= p.cfg.ConnMaxIdleTime {
+	lastUsed := cn.UsedAt()
+	if p.cfg.ConnMaxIdleTime > 0 && now.Sub(lastUsed) >= p.cfg.ConnMaxIdleTime {
 		return false
 	}
 
-	if connCheck(cn.netConn) != nil {
-		return false
+	if now.Sub(lastUsed) > time.Second {
+		if connCheck(cn.netConn) != nil {
+			return false
+		}
 	}
 
 	cn.SetUsedAt(now)
