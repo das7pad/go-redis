@@ -39,11 +39,11 @@ func NewConn(netConn net.Conn) *Conn {
 
 func (cn *Conn) UsedAt() time.Time {
 	unix := atomic.LoadInt64(&cn.usedAt)
-	return time.Unix(unix, 0)
+	return time.Unix(0, unix)
 }
 
 func (cn *Conn) SetUsedAt(tm time.Time) {
-	atomic.StoreInt64(&cn.usedAt, tm.Unix())
+	atomic.StoreInt64(&cn.usedAt, tm.UnixNano())
 }
 
 func (cn *Conn) SetNetConn(netConn net.Conn) {
