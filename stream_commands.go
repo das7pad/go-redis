@@ -85,9 +85,9 @@ func (c cmdable) XAdd(ctx context.Context, a *XAddArgs) *StringCmd {
 	} else {
 		args = append(args, "*")
 	}
-	args, argsS := appendArg(args, a.Values)
+	args, argsB, argsS := appendArg(args, a.Values)
 
-	cmd := NewStringCmd2Both(ctx, "xadd", a.Stream, args, argsS)
+	cmd := NewStringCmd2Both(ctx, "xadd", a.Stream, args, argsB, argsS)
 	_ = c(ctx, cmd)
 	return cmd
 }

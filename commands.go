@@ -50,70 +50,79 @@ func formatSec(ctx context.Context, dur time.Duration) int64 {
 	return int64(dur / time.Second)
 }
 
-func appendArgs(dst, src []interface{}) ([]interface{}, []string) {
+func appendArgs(dst, src []interface{}) ([]interface{}, [][]byte, []string) {
 	if len(src) == 1 {
 		return appendArg(dst, src[0])
 	}
 	if dst == nil {
-		return src, nil
+		return src, nil, nil
 	}
 
 	dst = append(dst, src...)
-	return dst, nil
+	return dst, nil, nil
 }
 
-func appendArg(dst []interface{}, arg interface{}) ([]interface{}, []string) {
+func appendArg(dst []interface{}, arg interface{}) ([]interface{}, [][]byte, []string) {
 	switch arg := arg.(type) {
+	case [][]byte:
+		if len(dst) > 0 {
+			for _, s := range arg {
+				dst = append(dst, s)
+			}
+			return dst, nil, nil
+		} else {
+			return nil, arg[:len(arg):len(arg)], nil
+		}
 	case []string:
 		if len(dst) > 0 {
 			for _, s := range arg {
 				dst = append(dst, s)
 			}
-			return dst, nil
+			return dst, nil, nil
 		} else {
-			return nil, arg[:len(arg):len(arg)]
+			return nil, nil, arg[:len(arg):len(arg)]
 		}
 	case []interface{}:
 		if len(dst) > 0 {
-			return append(dst, arg...), nil
+			return append(dst, arg...), nil, nil
 		} else {
-			return arg[:len(arg):len(arg)], nil
+			return arg[:len(arg):len(arg)], nil, nil
 		}
 	case map[string]interface{}:
 		for k, v := range arg {
 			dst = append(dst, k, v)
 		}
-		return dst, nil
+		return dst, nil, nil
 	case map[string]string:
 		if len(dst) > 0 {
 			for k, v := range arg {
 				dst = append(dst, k, v)
 			}
-			return dst, nil
+			return dst, nil, nil
 		}
 		argsS := make([]string, 0, len(arg)*2)
 		for k, v := range arg {
 			argsS = append(argsS, k, v)
 		}
-		return nil, argsS
+		return nil, nil, argsS
 	case int64, time.Time, time.Duration, encoding.BinaryMarshaler, net.IP:
-		return append(dst, arg), nil
+		return append(dst, arg), nil, nil
 	default:
 		// scan struct field
 		v := reflect.ValueOf(arg)
 		if v.Type().Kind() == reflect.Ptr {
 			if v.IsNil() {
 				// error: arg is not a valid object
-				return dst, nil
+				return dst, nil, nil
 			}
 			v = v.Elem()
 		}
 
 		if v.Type().Kind() == reflect.Struct {
-			return appendStructField(dst, v), nil
+			return appendStructField(dst, v), nil, nil
 		}
 
-		return append(dst, arg), nil
+		return append(dst, arg), nil, nil
 	}
 }
 
