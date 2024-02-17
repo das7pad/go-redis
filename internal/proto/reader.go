@@ -184,7 +184,6 @@ func (r *Reader) ReadReply() (interface{}, error) {
 }
 
 func (r *Reader) readFloat(line []byte) (float64, error) {
-	v := string(line[1:])
 	switch string(line[1:]) {
 	case "inf":
 		return math.Inf(1), nil
@@ -193,7 +192,7 @@ func (r *Reader) readFloat(line []byte) (float64, error) {
 	case "nan", "-nan":
 		return math.NaN(), nil
 	}
-	return strconv.ParseFloat(v, 64)
+	return util.ParseFloat(line[1:], 64)
 }
 
 func (r *Reader) readBool(line []byte) (bool, error) {
@@ -218,6 +217,27 @@ func (r *Reader) readStringReply(line []byte) (string, error) {
 	n, err := replyLen(line)
 	if err != nil {
 		return "", err
+	}
+
+	if n < 12 {
+		b, err := r.rd.Peek(n + 2)
+		if err != nil {
+			return "", err
+		}
+		if _, err = r.rd.Discard(n + 2); err != nil {
+			return "", err
+		}
+		switch {
+		case n == 2 && string(b) == "OK\r\n":
+			return "OK", nil
+		case n == 7 && string(b) == "message\r\n":
+			return "message", nil
+		case n == 9 && string(b) == "subscribe\r\n":
+			return "subscribe", nil
+		case n == 11 && string(b) == "unsubscribe\r\n":
+			return "unsubscribe", nil
+		}
+		return string(b[:n]), nil
 	}
 
 	b := make([]byte, n+2)
@@ -358,13 +378,20 @@ func (r *Reader) ReadFloat() (float64, error) {
 	case RespFloat:
 		return r.readFloat(line)
 	case RespStatus:
-		return strconv.ParseFloat(string(line[1:]), 64)
+		return util.ParseFloat(line[1:], 64)
 	case RespString:
-		s, err := r.readStringReply(line)
+		n, err := replyLen(line)
 		if err != nil {
 			return 0, err
 		}
-		return strconv.ParseFloat(s, 64)
+		s, err := r.rd.Peek(n + 2)
+		if err != nil {
+			return 0, err
+		}
+		if _, err = r.rd.Discard(n + 2); err != nil {
+			return 0, err
+		}
+		return util.ParseFloat(s[:n], 64)
 	}
 	return 0, fmt.Errorf("redis: can't parse float reply: %.100q", line)
 }
