@@ -183,6 +183,110 @@ func (r *Reader) ReadReply() (interface{}, error) {
 	return nil, fmt.Errorf("redis: can't parse %.100q", line)
 }
 
+func (r *Reader) ReadPubSubReply() (string, string, string, string, []string, int64, error) {
+	line, err := r.ReadLine()
+	if err != nil {
+		return "", "", "", "", nil, 0, err
+	}
+
+	switch line[0] {
+	case RespStatus:
+		return "pong", "", string(line[1:]), "", nil, 0, nil
+	case RespString:
+		v, err := r.readStringReply(line)
+		if err != nil {
+			return "", "", "", "", nil, 0, err
+		}
+		return "pong", "", v, "", nil, 0, err
+	case RespArray, RespSet, RespPush:
+		n, err := replyLen(line)
+		if err != nil {
+			return "", "", "", "", nil, 0, err
+		}
+		if n == 0 {
+			return "", "", "", "", nil, 0, fmt.Errorf("redis: expected multiple pub/sub response entries")
+		}
+		kind, err := r.ReadString()
+		if err != nil {
+			return "", "", "", "", nil, 0, err
+		}
+		switch kind {
+		case "pong":
+			if n != 2 {
+				return "", "", "", "", nil, 0, fmt.Errorf("redis: expected two pub/sub response entries")
+			}
+			v, err := r.ReadString()
+			return "pong", "", v, "", nil, 0, err
+		case "subscribe", "unsubscribe", "psubscribe", "punsubscribe", "ssubscribe", "sunsubscribe":
+			if n != 3 {
+				return "", "", "", "", nil, 0, fmt.Errorf("redis: expected three pub/sub response entries")
+			}
+			c, err := r.ReadString()
+			if err != nil {
+				return "", "", "", "", nil, 0, err
+			}
+			nc, err := r.ReadInt()
+			if err != nil {
+				return "", "", "", "", nil, 0, err
+			}
+			return kind, c, "", "", nil, nc, nil
+		case "message", "smessage":
+			if n != 3 {
+				return "", "", "", "", nil, 0, fmt.Errorf("redis: expected three pub/sub response entries")
+			}
+			c, err := r.ReadString()
+			if err != nil {
+				return "", "", "", "", nil, 0, err
+			}
+			line, err = r.ReadLine()
+			if err != nil {
+				return "", "", "", "", nil, 0, err
+			}
+			switch line[0] {
+			case RespString:
+				v, err := r.readStringReply(line)
+				if err != nil {
+					return "", "", "", "", nil, 0, err
+				}
+				return kind, c, v, "", nil, 0, nil
+			case RespArray, RespSet, RespPush:
+				n, err := replyLen(line)
+				if err != nil {
+					return "", "", "", "", nil, 0, err
+				}
+				ss := make([]string, n)
+				for i := 0; i < n; i++ {
+					v, err := r.ReadString()
+					if err != nil {
+						return "", "", "", "", nil, 0, err
+					}
+					ss[i] = v
+				}
+				return kind, c, "", "", ss, 0, nil
+			}
+		case "pmessage":
+			if n != 4 {
+				return "", "", "", "", nil, 0, fmt.Errorf("redis: expected four pub/sub response entries")
+			}
+			pat, err := r.ReadString()
+			if err != nil {
+				return "", "", "", "", nil, 0, err
+			}
+			c, err := r.ReadString()
+			if err != nil {
+				return "", "", "", "", nil, 0, err
+			}
+			v, err := r.ReadString()
+			if err != nil {
+				return "", "", "", "", nil, 0, err
+			}
+			return kind, c, v, pat, nil, 0, nil
+		}
+	}
+	rest, _ := r.rd.Peek(r.rd.Buffered())
+	return "", "", "", "", nil, 0, fmt.Errorf("redis: can't parse pub/sub message line=%.100q rest=%.100q", line, rest)
+}
+
 func (r *Reader) readFloat(line []byte) (float64, error) {
 	switch string(line[1:]) {
 	case "inf":
@@ -219,7 +323,7 @@ func (r *Reader) readStringReply(line []byte) (string, error) {
 		return "", err
 	}
 
-	if n < 12 {
+	if n < 13 {
 		b, err := r.rd.Peek(n + 2)
 		if err != nil {
 			return "", err
@@ -230,12 +334,26 @@ func (r *Reader) readStringReply(line []byte) (string, error) {
 		switch {
 		case n == 2 && string(b) == "OK\r\n":
 			return "OK", nil
+		case n == 4 && string(b) == "pong\r\n":
+			return "pong", nil
 		case n == 7 && string(b) == "message\r\n":
 			return "message", nil
+		case n == 8 && string(b) == "pmessage\r\n":
+			return "pmessage", nil
+		case n == 8 && string(b) == "smessage\r\n":
+			return "smessage", nil
 		case n == 9 && string(b) == "subscribe\r\n":
 			return "subscribe", nil
+		case n == 10 && string(b) == "psubscribe\r\n":
+			return "psubscribe", nil
+		case n == 10 && string(b) == "ssubscribe\r\n":
+			return "ssubscribe", nil
 		case n == 11 && string(b) == "unsubscribe\r\n":
 			return "unsubscribe", nil
+		case n == 12 && string(b) == "punsubscribe\r\n":
+			return "punsubscribe", nil
+		case n == 12 && string(b) == "sunsubscribe\r\n":
+			return "sunsubscribe", nil
 		}
 		return string(b[:n]), nil
 	}
