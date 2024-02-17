@@ -364,59 +364,6 @@ func (p *Pong) String() string {
 	return "Pong"
 }
 
-func (c *PubSub) newMessage(reply interface{}) (interface{}, error) {
-	switch reply := reply.(type) {
-	case string:
-		return &Pong{
-			Payload: reply,
-		}, nil
-	case []interface{}:
-		switch kind := reply[0].(string); kind {
-		case "subscribe", "unsubscribe", "psubscribe", "punsubscribe", "ssubscribe", "sunsubscribe":
-			// Can be nil in case of "unsubscribe".
-			channel, _ := reply[1].(string)
-			return &Subscription{
-				Kind:    kind,
-				Channel: channel,
-				Count:   int(reply[2].(int64)),
-			}, nil
-		case "message", "smessage":
-			switch payload := reply[2].(type) {
-			case string:
-				return &Message{
-					Channel: reply[1].(string),
-					Payload: payload,
-				}, nil
-			case []interface{}:
-				ss := make([]string, len(payload))
-				for i, s := range payload {
-					ss[i] = s.(string)
-				}
-				return &Message{
-					Channel:      reply[1].(string),
-					PayloadSlice: ss,
-				}, nil
-			default:
-				return nil, fmt.Errorf("redis: unsupported pubsub message payload: %T", payload)
-			}
-		case "pmessage":
-			return &Message{
-				Pattern: reply[1].(string),
-				Channel: reply[2].(string),
-				Payload: reply[3].(string),
-			}, nil
-		case "pong":
-			return &Pong{
-				Payload: reply[1].(string),
-			}, nil
-		default:
-			return nil, fmt.Errorf("redis: unsupported pubsub message: %q", kind)
-		}
-	default:
-		return nil, fmt.Errorf("redis: unsupported pubsub message: %#v", reply)
-	}
-}
-
 // ReceiveTimeout acts like Receive but returns an error if message
 // is not received in time. This is low-level API and in most cases
 // Channel should be used instead.
@@ -432,8 +379,36 @@ func (c *PubSub) ReceiveTimeout(ctx context.Context, timeout time.Duration) (int
 		return nil, err
 	}
 
+	var v interface{}
 	err = cn.WithReader(context.Background(), timeout, func(rd *proto.Reader) error {
-		return c.cmd.readReply(rd)
+		kind, cl, pl, pat, pll, n, err := rd.ReadPubSubReply()
+		if err != nil {
+			return err
+		}
+		switch kind {
+		case "subscribe", "unsubscribe", "psubscribe", "punsubscribe", "ssubscribe", "sunsubscribe":
+			v = &Subscription{
+				Kind:    kind,
+				Channel: cl,
+				Count:   int(n),
+			}
+		case "message", "smessage":
+			v = &Message{
+				Channel:      cl,
+				Payload:      pl,
+				PayloadSlice: pll,
+			}
+		case "pmessage":
+			v = &Message{
+				Pattern:      pat,
+				Channel:      cl,
+				Payload:      pl,
+				PayloadSlice: pll,
+			}
+		case "pong":
+			v = &Pong{Payload: pl}
+		}
+		return nil
 	})
 
 	c.releaseConnWithLock(ctx, cn, err, timeout > 0)
@@ -442,7 +417,7 @@ func (c *PubSub) ReceiveTimeout(ctx context.Context, timeout time.Duration) (int
 		return nil, err
 	}
 
-	return c.newMessage(c.cmd.Val())
+	return v, nil
 }
 
 // Receive returns a message as a Subscription, Message, Pong or error.
