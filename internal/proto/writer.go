@@ -34,7 +34,7 @@ func NewWriter(wr writer) *Writer {
 	}
 }
 
-func (w *Writer) WriteFullArgs(n int, cmd, firstArg, secondArg string, args []interface{}, argsS []string) error {
+func (w *Writer) WriteFullArgs(n int, cmd, firstArg, secondArg string, args []interface{}, argsB [][]byte, argsS []string) error {
 	if err := w.WriteByte(RespArray); err != nil {
 		return err
 	}
@@ -55,6 +55,11 @@ func (w *Writer) WriteFullArgs(n int, cmd, firstArg, secondArg string, args []in
 	}
 	if secondArg != "" {
 		if err := w.string(secondArg); err != nil {
+			return err
+		}
+	}
+	for _, arg := range argsB {
+		if err := w.bytes(arg); err != nil {
 			return err
 		}
 	}

@@ -46,7 +46,7 @@ type Cmder interface {
 }
 
 type extendedArgsCmder interface {
-	FullArgs() (int, string, string, string, []interface{}, []string)
+	FullArgs() (int, string, string, string, []interface{}, [][]byte, []string)
 }
 
 func setCmdsErr(cmds []Cmder, e error) {
@@ -109,7 +109,7 @@ func cmdString(cmd Cmder, val interface{}) string {
 	b := make([]byte, 0, 64)
 
 	if e, ok := cmd.(extendedArgsCmder); ok {
-		_, c, first, second, args, argsS := e.FullArgs()
+		_, c, first, second, args, argsB, argsS := e.FullArgs()
 		if c != "" {
 			if len(b) > 0 {
 				b = append(b, ' ')
@@ -133,6 +133,12 @@ func cmdString(cmd Cmder, val interface{}) string {
 				b = append(b, ' ')
 			}
 			b = internal.AppendArg(b, arg)
+		}
+		for _, arg := range argsB {
+			if len(b) > 0 {
+				b = append(b, ' ')
+			}
+			b = append(b, arg...)
 		}
 		for _, s := range argsS {
 			if len(b) > 0 {
@@ -168,6 +174,7 @@ type baseCmd struct {
 	firstArg  string
 	secondArg string
 	args      []interface{}
+	argsB     [][]byte
 	argsS     []string
 	err       error
 	keyPos    int8
@@ -206,7 +213,7 @@ func (cmd *baseCmd) NArgs() int {
 	if cmd.secondArg != "" {
 		i++
 	}
-	return i + len(cmd.args) + len(cmd.argsS)
+	return i + len(cmd.args) + len(cmd.argsB) + len(cmd.argsS)
 }
 
 func (cmd *baseCmd) Args() []interface{} {
@@ -221,14 +228,17 @@ func (cmd *baseCmd) Args() []interface{} {
 		args = append(args, cmd.secondArg)
 	}
 	args = append(args, cmd.args...)
+	for _, s := range cmd.argsB {
+		args = append(args, s)
+	}
 	for _, s := range cmd.argsS {
 		args = append(args, s)
 	}
 	return args
 }
 
-func (cmd *baseCmd) FullArgs() (int, string, string, string, []interface{}, []string) {
-	return cmd.NArgs(), cmd.cmd, cmd.firstArg, cmd.secondArg, cmd.args, cmd.argsS
+func (cmd *baseCmd) FullArgs() (int, string, string, string, []interface{}, [][]byte, []string) {
+	return cmd.NArgs(), cmd.cmd, cmd.firstArg, cmd.secondArg, cmd.args, cmd.argsB, cmd.argsS
 }
 
 func (cmd *baseCmd) stringArg(pos int) string {
@@ -249,6 +259,9 @@ func (cmd *baseCmd) stringArg(pos int) string {
 			return cmd.secondArg
 		}
 		pos--
+	}
+	if pos >= 0 && pos < len(cmd.argsB) {
+		return util.BytesToString(cmd.argsB[pos])
 	}
 	if pos >= 0 && pos < len(cmd.argsS) {
 		return cmd.argsS[pos]
@@ -768,13 +781,14 @@ func NewStatusCmd2(ctx context.Context, cmd, firstArg string, args []interface{}
 }
 
 func NewStatusCmd2Any(ctx context.Context, cmd, firstArg string, args []interface{}) *StatusCmd {
-	args, argsS := appendArgs(nil, args)
+	args, argsB, argsS := appendArgs(nil, args)
 	return &StatusCmd{
 		baseCmd: baseCmd{
 			ctx:      ctx,
 			cmd:      cmd,
 			firstArg: firstArg,
 			args:     args,
+			argsB:    argsB,
 			argsS:    argsS,
 		},
 	}
@@ -871,13 +885,14 @@ func NewIntCmd2(ctx context.Context, cmd, firstArg string, args []interface{}) *
 }
 
 func NewIntCmd2Any(ctx context.Context, cmd, firstArg string, args []interface{}) *IntCmd {
-	args, argsS := appendArgs(nil, args)
+	args, argsB, argsS := appendArgs(nil, args)
 	return &IntCmd{
 		baseCmd: baseCmd{
 			ctx:      ctx,
 			cmd:      cmd,
 			firstArg: firstArg,
 			args:     args,
+			argsB:    argsB,
 			argsS:    argsS,
 		},
 	}
@@ -974,13 +989,14 @@ func NewIntSliceCmd2(ctx context.Context, cmd, firstArg string, args []interface
 }
 
 func NewIntSliceCmd2Any(ctx context.Context, cmd, firstArg string, args []interface{}) *IntSliceCmd {
-	args, argsS := appendArgs(nil, args)
+	args, argsB, argsS := appendArgs(nil, args)
 	return &IntSliceCmd{
 		baseCmd: baseCmd{
 			ctx:      ctx,
 			cmd:      cmd,
 			firstArg: firstArg,
 			args:     args,
+			argsB:    argsB,
 			argsS:    argsS,
 		},
 	}
@@ -1199,13 +1215,14 @@ func NewBoolCmd2(ctx context.Context, cmd, firstArg string, args []interface{}) 
 }
 
 func NewBoolCmd2Any(ctx context.Context, cmd, firstArg string, args []interface{}) *BoolCmd {
-	args, argsS := appendArgs(nil, args)
+	args, argsB, argsS := appendArgs(nil, args)
 	return &BoolCmd{
 		baseCmd: baseCmd{
 			ctx:      ctx,
 			cmd:      cmd,
 			firstArg: firstArg,
 			args:     args,
+			argsB:    argsB,
 			argsS:    argsS,
 		},
 	}
@@ -1281,13 +1298,14 @@ func NewStringCmd2(ctx context.Context, cmd, firstArg string, args []interface{}
 	}
 }
 
-func NewStringCmd2Both(ctx context.Context, cmd, firstArg string, args []interface{}, argsS []string) *StringCmd {
+func NewStringCmd2Both(ctx context.Context, cmd, firstArg string, args []interface{}, argsB [][]byte, argsS []string) *StringCmd {
 	return &StringCmd{
 		baseCmd: baseCmd{
 			ctx:      ctx,
 			cmd:      cmd,
 			firstArg: firstArg,
 			args:     args,
+			argsB:    argsB,
 			argsS:    argsS,
 		},
 	}
@@ -1596,13 +1614,14 @@ func NewStringSliceCmd2(ctx context.Context, cmd, firstArg string, args []interf
 }
 
 func NewStringSliceCmd2Any(ctx context.Context, cmd, firstArg string, args []interface{}) *StringSliceCmd {
-	args, argsS := appendArgs(nil, args)
+	args, argsB, argsS := appendArgs(nil, args)
 	return &StringSliceCmd{
 		baseCmd: baseCmd{
 			ctx:      ctx,
 			cmd:      cmd,
 			firstArg: firstArg,
 			args:     args,
+			argsB:    argsB,
 			argsS:    argsS,
 		},
 	}
@@ -1806,13 +1825,14 @@ func NewBoolSliceCmd2(ctx context.Context, cmd, firstArg string, args []interfac
 }
 
 func NewBoolSliceCmd2Any(ctx context.Context, cmd, firstArg string, args []interface{}) *BoolSliceCmd {
-	args, argsS := appendArgs(nil, args)
+	args, argsB, argsS := appendArgs(nil, args)
 	return &BoolSliceCmd{
 		baseCmd: baseCmd{
 			ctx:      ctx,
 			cmd:      cmd,
 			firstArg: firstArg,
 			args:     args,
+			argsB:    argsB,
 			argsS:    argsS,
 		},
 	}
