@@ -414,6 +414,11 @@ func (c *PubSub) ReceiveTimeout(ctx context.Context, timeout time.Duration) (int
 	c.releaseConnWithLock(ctx, cn, err, timeout > 0)
 
 	if err != nil {
+		c.mu.Lock()
+		defer c.mu.Unlock()
+		if c.closed {
+			return nil, ErrClosed
+		}
 		return nil, err
 	}
 

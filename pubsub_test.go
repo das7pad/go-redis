@@ -459,14 +459,12 @@ var _ = Describe("PubSub", func() {
 
 			_, err := pubsub.ReceiveMessage(ctx)
 			Expect(err).To(HaveOccurred())
-			Expect(err.Error()).To(SatisfyAny(
-				Equal("redis: client is closed"),
-				ContainSubstring("use of closed network connection"),
-			))
+			Expect(err).To(Equal(redis.ErrClosed))
 		}()
 
 		wg.Wait()
 		wg.Add(1)
+		time.Sleep(100 * time.Millisecond)
 
 		Expect(pubsub.Close()).NotTo(HaveOccurred())
 
